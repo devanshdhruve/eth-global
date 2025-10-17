@@ -31,6 +31,7 @@ contract AnnotationMarketplace {
         uint256 tasksCompleted;
         uint256 tasksTotal;
         ProjectState state;
+        string hcsTopicId;
     }
 
     mapping(uint256 => Project) public projects;
@@ -59,7 +60,7 @@ contract AnnotationMarketplace {
     // CORE FUNCTIONS
     //=============
 
-    function createProject(string memory _datasetURI, uint256 _tasksTotal, uint256 _taskReward) external {
+    function createProject(string memory _datasetURI, uint256 _tasksTotal, uint256 _taskReward,) external {
         require(_tasksTotal > 0, "Must have at least one task");
         require(_taskReward > 0, "Reward cannot be zero");
 
@@ -80,7 +81,8 @@ contract AnnotationMarketplace {
             taskReward: _taskReward,
             tasksCompleted: 0,
             tasksTotal: _tasksTotal,
-            state: ProjectState.Open
+            state: ProjectState.Open,
+            hcsTopicId: _hcsTopicId
         });
 
         emit ProjectCreated(newProjectId, msg.sender, totalBounty);
