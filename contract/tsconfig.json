@@ -1,13 +1,14 @@
-/* Based on https://github.com/tsconfig/bases/blob/501da2bcd640cf95c95805783e1012b992338f28/bases/node22.json */
 {
   "compilerOptions": {
     "lib": ["es2023"],
-    "module": "node16",
+    "module": "commonjs",
     "target": "es2022",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "moduleResolution": "node16",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
     "outDir": "dist"
-  }
+  },
+  "include": ["hardhat.config.ts", "scripts/**/*", "test/**/*"]
 }

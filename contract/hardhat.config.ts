@@ -1,6 +1,8 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
-import "dotenv/config";
+import * as dotenv from "dotenv";
+
+dotenv.config();
 
 const accountId = process.env.HEDERA_TESTNET_ACCOUNT_ID;
 const privateKey = process.env.HEDERA_TESTNET_PRIVATE_KEY;
@@ -11,8 +13,17 @@ if (!accountId || !privateKey) {
   );
 }
 
-const config = {
-  solidity: "0.8.24",
+const config: HardhatUserConfig = {
+  solidity: {
+    version: "0.8.24",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200,
+      },
+      viaIR: true, // This fixes the "Stack too deep" error
+    },
+  },
   networks: {
     hedera_testnet: {
       url: "https://testnet.hashio.io/api",
