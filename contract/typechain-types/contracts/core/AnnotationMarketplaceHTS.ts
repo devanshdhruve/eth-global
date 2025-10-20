@@ -26,49 +26,54 @@ import type {
 export interface AnnotationMarketplaceHTSInterface extends Interface {
   getFunction(
     nameOrSignature:
+      | "annotatorSubmitted"
       | "completeProject"
       | "createProject"
-      | "escrows"
+      | "getAnnotatorProgress"
       | "getProject"
-      | "getSubmitted"
+      | "getReviewerProgress"
       | "nextProjectId"
       | "owner"
       | "projects"
-      | "releasePayment"
       | "renounceOwnership"
-      | "submitWork"
-      | "submittedTasks"
+      | "reviewerReviewed"
+      | "submitAnnotation"
+      | "submitReview"
       | "token"
       | "transferOwnership"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
+      | "AnnotationSubmitted"
       | "OwnershipTransferred"
-      | "PaymentReleased"
       | "ProjectCompleted"
       | "ProjectCreated"
-      | "WorkSubmitted"
+      | "ReviewSubmitted"
   ): EventFragment;
 
+  encodeFunctionData(
+    functionFragment: "annotatorSubmitted",
+    values: [BigNumberish, AddressLike]
+  ): string;
   encodeFunctionData(
     functionFragment: "completeProject",
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "createProject",
-    values: [BigNumberish, BigNumberish, BigNumberish]
+    values: [BigNumberish, BigNumberish, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "escrows",
-    values: [BigNumberish]
+    functionFragment: "getAnnotatorProgress",
+    values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "getProject",
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "getSubmitted",
+    functionFragment: "getReviewerProgress",
     values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
@@ -81,20 +86,20 @@ export interface AnnotationMarketplaceHTSInterface extends Interface {
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "releasePayment",
-    values: [BigNumberish, AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "renounceOwnership",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "submitWork",
+    functionFragment: "reviewerReviewed",
+    values: [BigNumberish, AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "submitAnnotation",
     values: [BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "submittedTasks",
-    values: [BigNumberish, AddressLike]
+    functionFragment: "submitReview",
+    values: [BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(functionFragment: "token", values?: undefined): string;
   encodeFunctionData(
@@ -103,6 +108,10 @@ export interface AnnotationMarketplaceHTSInterface extends Interface {
   ): string;
 
   decodeFunctionResult(
+    functionFragment: "annotatorSubmitted",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "completeProject",
     data: BytesLike
   ): Result;
@@ -110,10 +119,13 @@ export interface AnnotationMarketplaceHTSInterface extends Interface {
     functionFragment: "createProject",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "escrows", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "getAnnotatorProgress",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "getProject", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "getSubmitted",
+    functionFragment: "getReviewerProgress",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -123,16 +135,19 @@ export interface AnnotationMarketplaceHTSInterface extends Interface {
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "projects", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "releasePayment",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "renounceOwnership",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "submitWork", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "submittedTasks",
+    functionFragment: "reviewerReviewed",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "submitAnnotation",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "submitReview",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "token", data: BytesLike): Result;
@@ -142,12 +157,24 @@ export interface AnnotationMarketplaceHTSInterface extends Interface {
   ): Result;
 }
 
-export namespace OwnershipTransferredEvent {
-  export type InputTuple = [previousOwner: AddressLike, newOwner: AddressLike];
-  export type OutputTuple = [previousOwner: string, newOwner: string];
+export namespace AnnotationSubmittedEvent {
+  export type InputTuple = [
+    projectId: BigNumberish,
+    annotator: AddressLike,
+    taskCount: BigNumberish,
+    reward: BigNumberish
+  ];
+  export type OutputTuple = [
+    projectId: bigint,
+    annotator: string,
+    taskCount: bigint,
+    reward: bigint
+  ];
   export interface OutputObject {
-    previousOwner: string;
-    newOwner: string;
+    projectId: bigint;
+    annotator: string;
+    taskCount: bigint;
+    reward: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -155,21 +182,12 @@ export namespace OwnershipTransferredEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace PaymentReleasedEvent {
-  export type InputTuple = [
-    projectId: BigNumberish,
-    annotator: AddressLike,
-    amount: BigNumberish
-  ];
-  export type OutputTuple = [
-    projectId: bigint,
-    annotator: string,
-    amount: bigint
-  ];
+export namespace OwnershipTransferredEvent {
+  export type InputTuple = [previousOwner: AddressLike, newOwner: AddressLike];
+  export type OutputTuple = [previousOwner: string, newOwner: string];
   export interface OutputObject {
-    projectId: bigint;
-    annotator: string;
-    amount: bigint;
+    previousOwner: string;
+    newOwner: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -196,6 +214,8 @@ export namespace ProjectCreatedEvent {
     client: AddressLike,
     totalTasks: BigNumberish,
     rewardPerTask: BigNumberish,
+    annotatorShare: BigNumberish,
+    reviewerShare: BigNumberish,
     deposit: BigNumberish
   ];
   export type OutputTuple = [
@@ -203,6 +223,8 @@ export namespace ProjectCreatedEvent {
     client: string,
     totalTasks: bigint,
     rewardPerTask: bigint,
+    annotatorShare: bigint,
+    reviewerShare: bigint,
     deposit: bigint
   ];
   export interface OutputObject {
@@ -210,6 +232,8 @@ export namespace ProjectCreatedEvent {
     client: string;
     totalTasks: bigint;
     rewardPerTask: bigint;
+    annotatorShare: bigint;
+    reviewerShare: bigint;
     deposit: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -218,21 +242,24 @@ export namespace ProjectCreatedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace WorkSubmittedEvent {
+export namespace ReviewSubmittedEvent {
   export type InputTuple = [
     projectId: BigNumberish,
-    annotator: AddressLike,
-    taskCount: BigNumberish
+    reviewer: AddressLike,
+    taskCount: BigNumberish,
+    reward: BigNumberish
   ];
   export type OutputTuple = [
     projectId: bigint,
-    annotator: string,
-    taskCount: bigint
+    reviewer: string,
+    taskCount: bigint,
+    reward: bigint
   ];
   export interface OutputObject {
     projectId: bigint;
-    annotator: string;
+    reviewer: string;
     taskCount: bigint;
+    reward: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -283,6 +310,12 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  annotatorSubmitted: TypedContractMethod<
+    [arg0: BigNumberish, arg1: AddressLike],
+    [bigint],
+    "view"
+  >;
+
   completeProject: TypedContractMethod<
     [projectId: BigNumberish],
     [void],
@@ -293,42 +326,38 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
     [
       totalTasks: BigNumberish,
       rewardPerTask: BigNumberish,
-      depositAmount: BigNumberish
+      annotatorShare: BigNumberish,
+      reviewerShare: BigNumberish
     ],
     [bigint],
     "nonpayable"
   >;
 
-  escrows: TypedContractMethod<
-    [arg0: BigNumberish],
-    [
-      [bigint, bigint, boolean] & {
-        totalDeposited: bigint;
-        balance: bigint;
-        active: boolean;
-      }
-    ],
+  getAnnotatorProgress: TypedContractMethod<
+    [projectId: BigNumberish, annotator: AddressLike],
+    [bigint],
     "view"
   >;
 
   getProject: TypedContractMethod<
     [projectId: BigNumberish],
     [
-      [string, bigint, bigint, bigint, boolean, bigint, bigint] & {
+      [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean] & {
         client: string;
         totalTasks: bigint;
         rewardPerTask: bigint;
+        annotatorShare: bigint;
+        reviewerShare: bigint;
+        escrowed: bigint;
         paidOut: bigint;
         completed: boolean;
-        totalDeposited: bigint;
-        balance: bigint;
       }
     ],
     "view"
   >;
 
-  getSubmitted: TypedContractMethod<
-    [projectId: BigNumberish, annotator: AddressLike],
+  getReviewerProgress: TypedContractMethod<
+    [projectId: BigNumberish, reviewer: AddressLike],
     [bigint],
     "view"
   >;
@@ -340,10 +369,13 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
   projects: TypedContractMethod<
     [arg0: BigNumberish],
     [
-      [string, bigint, bigint, bigint, boolean] & {
+      [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean] & {
         client: string;
         totalTasks: bigint;
         rewardPerTask: bigint;
+        annotatorShare: bigint;
+        reviewerShare: bigint;
+        escrowed: bigint;
         paidOut: bigint;
         completed: boolean;
       }
@@ -351,24 +383,24 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
     "view"
   >;
 
-  releasePayment: TypedContractMethod<
-    [projectId: BigNumberish, annotator: AddressLike, taskCount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-
   renounceOwnership: TypedContractMethod<[], [void], "nonpayable">;
 
-  submitWork: TypedContractMethod<
+  reviewerReviewed: TypedContractMethod<
+    [arg0: BigNumberish, arg1: AddressLike],
+    [bigint],
+    "view"
+  >;
+
+  submitAnnotation: TypedContractMethod<
     [projectId: BigNumberish, taskCount: BigNumberish],
     [void],
     "nonpayable"
   >;
 
-  submittedTasks: TypedContractMethod<
-    [arg0: BigNumberish, arg1: AddressLike],
-    [bigint],
-    "view"
+  submitReview: TypedContractMethod<
+    [projectId: BigNumberish, taskCount: BigNumberish],
+    [void],
+    "nonpayable"
   >;
 
   token: TypedContractMethod<[], [string], "view">;
@@ -384,6 +416,13 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
   ): T;
 
   getFunction(
+    nameOrSignature: "annotatorSubmitted"
+  ): TypedContractMethod<
+    [arg0: BigNumberish, arg1: AddressLike],
+    [bigint],
+    "view"
+  >;
+  getFunction(
     nameOrSignature: "completeProject"
   ): TypedContractMethod<[projectId: BigNumberish], [void], "nonpayable">;
   getFunction(
@@ -392,22 +431,17 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
     [
       totalTasks: BigNumberish,
       rewardPerTask: BigNumberish,
-      depositAmount: BigNumberish
+      annotatorShare: BigNumberish,
+      reviewerShare: BigNumberish
     ],
     [bigint],
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "escrows"
+    nameOrSignature: "getAnnotatorProgress"
   ): TypedContractMethod<
-    [arg0: BigNumberish],
-    [
-      [bigint, bigint, boolean] & {
-        totalDeposited: bigint;
-        balance: bigint;
-        active: boolean;
-      }
-    ],
+    [projectId: BigNumberish, annotator: AddressLike],
+    [bigint],
     "view"
   >;
   getFunction(
@@ -415,22 +449,23 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
   ): TypedContractMethod<
     [projectId: BigNumberish],
     [
-      [string, bigint, bigint, bigint, boolean, bigint, bigint] & {
+      [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean] & {
         client: string;
         totalTasks: bigint;
         rewardPerTask: bigint;
+        annotatorShare: bigint;
+        reviewerShare: bigint;
+        escrowed: bigint;
         paidOut: bigint;
         completed: boolean;
-        totalDeposited: bigint;
-        balance: bigint;
       }
     ],
     "view"
   >;
   getFunction(
-    nameOrSignature: "getSubmitted"
+    nameOrSignature: "getReviewerProgress"
   ): TypedContractMethod<
-    [projectId: BigNumberish, annotator: AddressLike],
+    [projectId: BigNumberish, reviewer: AddressLike],
     [bigint],
     "view"
   >;
@@ -445,10 +480,13 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
   ): TypedContractMethod<
     [arg0: BigNumberish],
     [
-      [string, bigint, bigint, bigint, boolean] & {
+      [string, bigint, bigint, bigint, bigint, bigint, bigint, boolean] & {
         client: string;
         totalTasks: bigint;
         rewardPerTask: bigint;
+        annotatorShare: bigint;
+        reviewerShare: bigint;
+        escrowed: bigint;
         paidOut: bigint;
         completed: boolean;
       }
@@ -456,28 +494,28 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "releasePayment"
-  ): TypedContractMethod<
-    [projectId: BigNumberish, annotator: AddressLike, taskCount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
     nameOrSignature: "renounceOwnership"
   ): TypedContractMethod<[], [void], "nonpayable">;
   getFunction(
-    nameOrSignature: "submitWork"
+    nameOrSignature: "reviewerReviewed"
+  ): TypedContractMethod<
+    [arg0: BigNumberish, arg1: AddressLike],
+    [bigint],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "submitAnnotation"
   ): TypedContractMethod<
     [projectId: BigNumberish, taskCount: BigNumberish],
     [void],
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "submittedTasks"
+    nameOrSignature: "submitReview"
   ): TypedContractMethod<
-    [arg0: BigNumberish, arg1: AddressLike],
-    [bigint],
-    "view"
+    [projectId: BigNumberish, taskCount: BigNumberish],
+    [void],
+    "nonpayable"
   >;
   getFunction(
     nameOrSignature: "token"
@@ -487,18 +525,18 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
   ): TypedContractMethod<[newOwner: AddressLike], [void], "nonpayable">;
 
   getEvent(
+    key: "AnnotationSubmitted"
+  ): TypedContractEvent<
+    AnnotationSubmittedEvent.InputTuple,
+    AnnotationSubmittedEvent.OutputTuple,
+    AnnotationSubmittedEvent.OutputObject
+  >;
+  getEvent(
     key: "OwnershipTransferred"
   ): TypedContractEvent<
     OwnershipTransferredEvent.InputTuple,
     OwnershipTransferredEvent.OutputTuple,
     OwnershipTransferredEvent.OutputObject
-  >;
-  getEvent(
-    key: "PaymentReleased"
-  ): TypedContractEvent<
-    PaymentReleasedEvent.InputTuple,
-    PaymentReleasedEvent.OutputTuple,
-    PaymentReleasedEvent.OutputObject
   >;
   getEvent(
     key: "ProjectCompleted"
@@ -515,14 +553,25 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
     ProjectCreatedEvent.OutputObject
   >;
   getEvent(
-    key: "WorkSubmitted"
+    key: "ReviewSubmitted"
   ): TypedContractEvent<
-    WorkSubmittedEvent.InputTuple,
-    WorkSubmittedEvent.OutputTuple,
-    WorkSubmittedEvent.OutputObject
+    ReviewSubmittedEvent.InputTuple,
+    ReviewSubmittedEvent.OutputTuple,
+    ReviewSubmittedEvent.OutputObject
   >;
 
   filters: {
+    "AnnotationSubmitted(uint256,address,uint256,uint256)": TypedContractEvent<
+      AnnotationSubmittedEvent.InputTuple,
+      AnnotationSubmittedEvent.OutputTuple,
+      AnnotationSubmittedEvent.OutputObject
+    >;
+    AnnotationSubmitted: TypedContractEvent<
+      AnnotationSubmittedEvent.InputTuple,
+      AnnotationSubmittedEvent.OutputTuple,
+      AnnotationSubmittedEvent.OutputObject
+    >;
+
     "OwnershipTransferred(address,address)": TypedContractEvent<
       OwnershipTransferredEvent.InputTuple,
       OwnershipTransferredEvent.OutputTuple,
@@ -532,17 +581,6 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
       OwnershipTransferredEvent.InputTuple,
       OwnershipTransferredEvent.OutputTuple,
       OwnershipTransferredEvent.OutputObject
-    >;
-
-    "PaymentReleased(uint256,address,uint256)": TypedContractEvent<
-      PaymentReleasedEvent.InputTuple,
-      PaymentReleasedEvent.OutputTuple,
-      PaymentReleasedEvent.OutputObject
-    >;
-    PaymentReleased: TypedContractEvent<
-      PaymentReleasedEvent.InputTuple,
-      PaymentReleasedEvent.OutputTuple,
-      PaymentReleasedEvent.OutputObject
     >;
 
     "ProjectCompleted(uint256,uint256)": TypedContractEvent<
@@ -556,7 +594,7 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
       ProjectCompletedEvent.OutputObject
     >;
 
-    "ProjectCreated(uint256,address,uint256,uint256,uint256)": TypedContractEvent<
+    "ProjectCreated(uint256,address,uint256,uint256,uint256,uint256,uint256)": TypedContractEvent<
       ProjectCreatedEvent.InputTuple,
       ProjectCreatedEvent.OutputTuple,
       ProjectCreatedEvent.OutputObject
@@ -567,15 +605,15 @@ export interface AnnotationMarketplaceHTS extends BaseContract {
       ProjectCreatedEvent.OutputObject
     >;
 
-    "WorkSubmitted(uint256,address,uint256)": TypedContractEvent<
-      WorkSubmittedEvent.InputTuple,
-      WorkSubmittedEvent.OutputTuple,
-      WorkSubmittedEvent.OutputObject
+    "ReviewSubmitted(uint256,address,uint256,uint256)": TypedContractEvent<
+      ReviewSubmittedEvent.InputTuple,
+      ReviewSubmittedEvent.OutputTuple,
+      ReviewSubmittedEvent.OutputObject
     >;
-    WorkSubmitted: TypedContractEvent<
-      WorkSubmittedEvent.InputTuple,
-      WorkSubmittedEvent.OutputTuple,
-      WorkSubmittedEvent.OutputObject
+    ReviewSubmitted: TypedContractEvent<
+      ReviewSubmittedEvent.InputTuple,
+      ReviewSubmittedEvent.OutputTuple,
+      ReviewSubmittedEvent.OutputObject
     >;
   };
 }

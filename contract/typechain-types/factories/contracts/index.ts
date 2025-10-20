@@ -2,5 +2,4 @@
 /* tslint:disable */
 /* eslint-disable */
 export * as core from "./core";
-export * as hedera from "./hedera";
 export * as interface from "./interface";

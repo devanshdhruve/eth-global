@@ -3,7 +3,5 @@
 /* eslint-disable */
 import type * as core from "./core";
 export type { core };
-import type * as hedera from "./hedera";
-export type { hedera };
 import type * as interface from "./interface";
 export type { interface };

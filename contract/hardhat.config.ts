@@ -26,12 +26,13 @@ const config: HardhatUserConfig = {
       url: "https://testnet.hashio.io/api",
       chainId: 296,
       accounts: process.env.HEDERA_TESTNET_PRIVATE_KEY
-        ? [process.env.HEDERA_TESTNET_PRIVATE_KEY]
-        : [],
-      gas: 10_000_000, // Hedera has high gas limits
-      gasPrice: 80_000_000_000, // 80 gwei (typical for Hedera)
-      timeout: 120_000, // 2 minutes timeout
+      ? [process.env.HEDERA_TESTNET_PRIVATE_KEY]
+      : [],
+      gas: 10_000_000,
+      gasPrice: 490_000_000_000, // ✅ Minimum required (490 gwei)
+      timeout: 120_000,
     },
+
 
     // Hedera Mainnet (when ready for production)
     "hedera-mainnet": {

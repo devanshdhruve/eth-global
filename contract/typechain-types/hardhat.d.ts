@@ -26,10 +26,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.AnnotationMarketplaceHTS__factory>;
     getContractFactory(
-      name: "MockHTS",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.MockHTS__factory>;
-    getContractFactory(
       name: "IReputationSystem",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IReputationSystem__factory>;
@@ -50,11 +46,6 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.AnnotationMarketplaceHTS>;
     getContractAt(
-      name: "MockHTS",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.MockHTS>;
-    getContractAt(
       name: "IReputationSystem",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -72,10 +63,6 @@ declare module "hardhat/types/runtime" {
       name: "AnnotationMarketplaceHTS",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.AnnotationMarketplaceHTS>;
-    deployContract(
-      name: "MockHTS",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockHTS>;
     deployContract(
       name: "IReputationSystem",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -96,11 +83,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.AnnotationMarketplaceHTS>;
-    deployContract(
-      name: "MockHTS",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockHTS>;
     deployContract(
       name: "IReputationSystem",
       args: any[],

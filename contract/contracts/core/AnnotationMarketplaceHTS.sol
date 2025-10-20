@@ -7,183 +7,161 @@ import "../hedera/HederaTokenWrapper.sol";
 
 /**
  * @title AnnotationMarketplaceHTS
- * @notice Escrow-based annotation marketplace using Hedera HTS on-chain transfers.
+ * @notice Multi-role annotation marketplace using Hedera HTS with escrowed auto-payments.
  *
- * Flow (escrow model):
- * 1) Client uses Hedera SDK to approve marketplace contract as a spender for `depositAmount`.
- * 2) Client calls createProject(totalTasks, rewardPerTask, depositAmount).
- *    The contract pulls depositAmount tokens from client → contract (escrow).
- * 3) Annotator submits work.
- * 4) Client reviews → releasePayment(projectId, annotator, taskCount).
- * 5) When project ends, remaining escrow refunded to client via completeProject().
+ * Flow:
+ * - Client creates a project and deposits tokens into escrow (HTS on-chain transferFrom).
+ * - Annotators submit completed tasks and receive their share automatically.
+ * - Reviewers review tasks and receive their share automatically.
+ * - Client can complete the project to refund any remaining escrow.
  */
 contract AnnotationMarketplaceHTS is Ownable, ReentrancyGuard {
     using HederaTokenWrapper for *;
 
-    // HTS fungible token used for payments
-    address public token;
+    address public token; // HTS token EVM address
     uint256 public nextProjectId;
 
-    // ------------------------------------------------------------------------
-    // STRUCTS
-    // ------------------------------------------------------------------------
-
     struct Project {
-        address client;         // project owner (payer)
-        uint256 totalTasks;     // number of annotation tasks
-        uint256 rewardPerTask;  // per-task reward (smallest token units)
-        uint256 paidOut;        // total paid so far
-        bool completed;         // project marked complete
+        address client;
+        uint256 totalTasks;
+        uint256 rewardPerTask;    // total reward per task
+        uint256 annotatorShare;   // % (e.g. 50 = 50%)
+        uint256 reviewerShare;    // % (must sum to 100 with annotatorShare)
+        uint256 escrowed;
+        uint256 paidOut;
+        bool completed;
     }
-
-    struct EscrowInfo {
-        uint256 totalDeposited; // total tokens deposited
-        uint256 balance;        // current tokens held in escrow
-        bool active;            // true when escrow is funded
-    }
-
-    // ------------------------------------------------------------------------
-    // STATE
-    // ------------------------------------------------------------------------
 
     mapping(uint256 => Project) public projects;
-    mapping(uint256 => EscrowInfo) public escrows;
-    mapping(uint256 => mapping(address => uint256)) public submittedTasks;
 
-    // ------------------------------------------------------------------------
-    // EVENTS
-    // ------------------------------------------------------------------------
+    // annotator => submitted tasks
+    mapping(uint256 => mapping(address => uint256)) public annotatorSubmitted;
+    // reviewer => reviewed tasks
+    mapping(uint256 => mapping(address => uint256)) public reviewerReviewed;
 
-    event ProjectCreated(uint256 indexed projectId, address indexed client, uint256 totalTasks, uint256 rewardPerTask, uint256 deposit);
-    event WorkSubmitted(uint256 indexed projectId, address indexed annotator, uint256 taskCount);
-    event PaymentReleased(uint256 indexed projectId, address indexed annotator, uint256 amount);
+    event ProjectCreated(
+        uint256 indexed projectId,
+        address indexed client,
+        uint256 totalTasks,
+        uint256 rewardPerTask,
+        uint256 annotatorShare,
+        uint256 reviewerShare,
+        uint256 deposit
+    );
+
+    event AnnotationSubmitted(uint256 indexed projectId, address indexed annotator, uint256 taskCount, uint256 reward);
+    event ReviewSubmitted(uint256 indexed projectId, address indexed reviewer, uint256 taskCount, uint256 reward);
     event ProjectCompleted(uint256 indexed projectId, uint256 refunded);
-
-    // ------------------------------------------------------------------------
-    // CONSTRUCTOR
-    // ------------------------------------------------------------------------
 
     constructor(address _token) Ownable(msg.sender) {
         require(_token != address(0), "invalid token");
         token = _token;
     }
 
-    // ------------------------------------------------------------------------
-    // 1️⃣ PROJECT CREATION + ESCROW FUNDING
-    // ------------------------------------------------------------------------
-
-    function createProject(uint256 totalTasks, uint256 rewardPerTask, uint256 depositAmount)
-        external
-        nonReentrant
-        returns (uint256)
-    {
-        require(totalTasks > 0, "invalid totalTasks");
+    /**
+     * @notice Create a new annotation project with given reward distribution
+     */
+    function createProject(
+        uint256 totalTasks,
+        uint256 rewardPerTask,
+        uint256 annotatorShare,
+        uint256 reviewerShare
+    ) external nonReentrant returns (uint256) {
+        require(totalTasks > 0, "invalid tasks");
         require(rewardPerTask > 0, "invalid reward");
-        require(depositAmount == totalTasks * rewardPerTask, "deposit mismatch");
+        require(annotatorShare + reviewerShare == 100, "shares must total 100");
 
+        uint256 totalDeposit = totalTasks * rewardPerTask;
         uint256 projectId = nextProjectId++;
+
         projects[projectId] = Project({
             client: msg.sender,
             totalTasks: totalTasks,
             rewardPerTask: rewardPerTask,
+            annotatorShare: annotatorShare,
+            reviewerShare: reviewerShare,
+            escrowed: 0,
             paidOut: 0,
             completed: false
         });
 
-        // Transfer tokens from client → contract (escrow)
-        int64 amt = HederaTokenWrapper.toInt64(depositAmount);
+        // transferFrom client -> contract
+        int64 amt = HederaTokenWrapper.toInt64(totalDeposit);
         bool ok = HederaTokenWrapper.transferFromToken(token, msg.sender, address(this), amt);
         require(ok, "HTS transferFrom failed");
 
-        escrows[projectId] = EscrowInfo({
-            totalDeposited: depositAmount,
-            balance: depositAmount,
-            active: true
-        });
+        projects[projectId].escrowed = totalDeposit;
 
-        emit ProjectCreated(projectId, msg.sender, totalTasks, rewardPerTask, depositAmount);
+        emit ProjectCreated(projectId, msg.sender, totalTasks, rewardPerTask, annotatorShare, reviewerShare, totalDeposit);
         return projectId;
     }
 
-    // ------------------------------------------------------------------------
-    // 2️⃣ WORK SUBMISSION
-    // ------------------------------------------------------------------------
-
-    function submitWork(uint256 projectId, uint256 taskCount) external nonReentrant {
+    /**
+     * @notice Annotator submits completed work and receives their token share automatically.
+     */
+    function submitAnnotation(uint256 projectId, uint256 taskCount) external nonReentrant {
         require(taskCount > 0, "taskCount zero");
         Project storage p = projects[projectId];
-        require(p.client != address(0), "project not found");
         require(!p.completed, "project completed");
-        require(escrows[projectId].active, "escrow inactive");
 
-        submittedTasks[projectId][msg.sender] += taskCount;
-        emit WorkSubmitted(projectId, msg.sender, taskCount);
+        uint256 reward = (taskCount * p.rewardPerTask * p.annotatorShare) / 100;
+        uint256 available = p.escrowed - p.paidOut;
+        require(reward <= available, "insufficient escrow");
+
+        p.paidOut += reward;
+        annotatorSubmitted[projectId][msg.sender] += taskCount;
+
+        int64 amt = HederaTokenWrapper.toInt64(reward);
+        bool ok = HederaTokenWrapper.transferToken(token, address(this), msg.sender, amt);
+        require(ok, "HTS annotator payment failed");
+
+        emit AnnotationSubmitted(projectId, msg.sender, taskCount, reward);
     }
 
-    // ------------------------------------------------------------------------
-    // 3️⃣ ESCROW RELEASE TO ANNOTATOR
-    // ------------------------------------------------------------------------
-
-    function releasePayment(uint256 projectId, address annotator, uint256 taskCount)
-        external
-        nonReentrant
-    {
+    /**
+     * @notice Reviewer reviews work and receives their token share automatically.
+     */
+    function submitReview(uint256 projectId, uint256 taskCount) external nonReentrant {
         require(taskCount > 0, "taskCount zero");
         Project storage p = projects[projectId];
-        EscrowInfo storage e = escrows[projectId];
-
-        require(p.client != address(0), "project not found");
         require(!p.completed, "project completed");
-        require(msg.sender == p.client, "only client can release");
-        require(e.active && e.balance > 0, "escrow empty or inactive");
 
-        uint256 amount = taskCount * p.rewardPerTask;
-        require(amount <= e.balance, "insufficient escrow");
-        require(submittedTasks[projectId][annotator] >= taskCount, "insufficient submitted tasks");
+        uint256 reward = (taskCount * p.rewardPerTask * p.reviewerShare) / 100;
+        uint256 available = p.escrowed - p.paidOut;
+        require(reward <= available, "insufficient escrow");
 
-        // accounting
-        submittedTasks[projectId][annotator] -= taskCount;
-        e.balance -= amount;
-        p.paidOut += amount;
+        p.paidOut += reward;
+        reviewerReviewed[projectId][msg.sender] += taskCount;
 
-        // transfer tokens contract → annotator
-        int64 amt = HederaTokenWrapper.toInt64(amount);
-        bool ok = HederaTokenWrapper.transferToken(token, address(this), annotator, amt);
-        require(ok, "HTS transfer failed");
+        int64 amt = HederaTokenWrapper.toInt64(reward);
+        bool ok = HederaTokenWrapper.transferToken(token, address(this), msg.sender, amt);
+        require(ok, "HTS reviewer payment failed");
 
-        emit PaymentReleased(projectId, annotator, amount);
+        emit ReviewSubmitted(projectId, msg.sender, taskCount, reward);
     }
 
-    // ------------------------------------------------------------------------
-    // 4️⃣ COMPLETE PROJECT + REFUND REMAINING ESCROW
-    // ------------------------------------------------------------------------
-
+    /**
+     * @notice Mark project as completed and refund remaining escrow to client
+     */
     function completeProject(uint256 projectId) external nonReentrant {
         Project storage p = projects[projectId];
-        EscrowInfo storage e = escrows[projectId];
-
-        require(p.client != address(0), "project not found");
-        require(!p.completed, "already completed");
         require(msg.sender == p.client, "only client");
+        require(!p.completed, "already completed");
 
-        uint256 remaining = e.balance;
-
+        uint256 remaining = p.escrowed - p.paidOut;
         if (remaining > 0) {
-            e.balance = 0;
+            p.paidOut += remaining;
+
             int64 amt = HederaTokenWrapper.toInt64(remaining);
             bool ok = HederaTokenWrapper.transferToken(token, address(this), p.client, amt);
-            require(ok, "HTS refund failed");
+            require(ok, "refund failed");
         }
 
         p.completed = true;
-        e.active = false;
-
         emit ProjectCompleted(projectId, remaining);
     }
 
-    // ------------------------------------------------------------------------
-    // VIEW HELPERS
-    // ------------------------------------------------------------------------
+    /* ========== VIEW HELPERS ========== */
 
     function getProject(uint256 projectId)
         external
@@ -192,27 +170,22 @@ contract AnnotationMarketplaceHTS is Ownable, ReentrancyGuard {
             address client,
             uint256 totalTasks,
             uint256 rewardPerTask,
+            uint256 annotatorShare,
+            uint256 reviewerShare,
+            uint256 escrowed,
             uint256 paidOut,
-            bool completed,
-            uint256 totalDeposited,
-            uint256 balance
+            bool completed
         )
     {
         Project storage p = projects[projectId];
-        EscrowInfo storage e = escrows[projectId];
-        require(p.client != address(0), "project not found");
-        return (
-            p.client,
-            p.totalTasks,
-            p.rewardPerTask,
-            p.paidOut,
-            p.completed,
-            e.totalDeposited,
-            e.balance
-        );
+        return (p.client, p.totalTasks, p.rewardPerTask, p.annotatorShare, p.reviewerShare, p.escrowed, p.paidOut, p.completed);
     }
 
-    function getSubmitted(uint256 projectId, address annotator) external view returns (uint256) {
-        return submittedTasks[projectId][annotator];
+    function getAnnotatorProgress(uint256 projectId, address annotator) external view returns (uint256) {
+        return annotatorSubmitted[projectId][annotator];
+    }
+
+    function getReviewerProgress(uint256 projectId, address reviewer) external view returns (uint256) {
+        return reviewerReviewed[projectId][reviewer];
     }
 }

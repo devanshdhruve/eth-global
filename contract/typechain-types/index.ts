@@ -12,7 +12,5 @@ export type { ReentrancyGuard } from "./@openzeppelin/contracts/utils/Reentrancy
 export { ReentrancyGuard__factory } from "./factories/@openzeppelin/contracts/utils/ReentrancyGuard__factory";
 export type { AnnotationMarketplaceHTS } from "./contracts/core/AnnotationMarketplaceHTS";
 export { AnnotationMarketplaceHTS__factory } from "./factories/contracts/core/AnnotationMarketplaceHTS__factory";
-export type { MockHTS } from "./contracts/hedera/MockHTS";
-export { MockHTS__factory } from "./factories/contracts/hedera/MockHTS__factory";
 export type { IReputationSystem } from "./contracts/interface/IReputationSystem";
 export { IReputationSystem__factory } from "./factories/contracts/interface/IReputationSystem__factory";

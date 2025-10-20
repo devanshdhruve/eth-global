@@ -14,7 +14,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const operatorId = AccountId.fromString(process.env.HEDERA_TESTNET_ACCOUNT_ID!);
-const operatorKey = PrivateKey.fromString(process.env.HEDERA_TESTNET_PRIVATE_KEY!);
+const operatorKey = PrivateKey.fromString(process.env.HEDERA_TESTNET_OPERATOR_KEY!);
 
 const client = Client.forTestnet().setOperator(operatorId, operatorKey);
 
