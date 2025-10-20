@@ -21,36 +21,35 @@ import type {
   TypedLogDescription,
   TypedListener,
   TypedContractMethod,
-} from "../common";
+} from "../../common";
 
-export interface MockHTSTokenInterface extends Interface {
+export interface MockHTSInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "balanceOf"
-      | "decimals"
-      | "mint"
-      | "name"
-      | "symbol"
-      | "transferFrom"
+      | "balances"
+      | "getBalance"
+      | "setBalance"
       | "transferToken"
   ): FunctionFragment;
 
-  getEvent(nameOrSignatureOrTopic: "Transfer"): EventFragment;
+  getEvent(nameOrSignatureOrTopic: "MockTransfer"): EventFragment;
 
   encodeFunctionData(
     functionFragment: "balanceOf",
-    values: [AddressLike]
+    values: [AddressLike, AddressLike]
   ): string;
-  encodeFunctionData(functionFragment: "decimals", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "mint",
-    values: [AddressLike, BigNumberish]
+    functionFragment: "balances",
+    values: [AddressLike, AddressLike]
   ): string;
-  encodeFunctionData(functionFragment: "name", values?: undefined): string;
-  encodeFunctionData(functionFragment: "symbol", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "transferFrom",
-    values: [AddressLike, AddressLike, AddressLike, BigNumberish]
+    functionFragment: "getBalance",
+    values: [AddressLike, AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "setBalance",
+    values: [AddressLike, AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "transferToken",
@@ -58,31 +57,33 @@ export interface MockHTSTokenInterface extends Interface {
   ): string;
 
   decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "decimals", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "mint", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "name", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "symbol", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "transferFrom",
-    data: BytesLike
-  ): Result;
+  decodeFunctionResult(functionFragment: "balances", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "getBalance", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "setBalance", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "transferToken",
     data: BytesLike
   ): Result;
 }
 
-export namespace TransferEvent {
+export namespace MockTransferEvent {
   export type InputTuple = [
+    token: AddressLike,
     from: AddressLike,
     to: AddressLike,
-    value: BigNumberish
+    amount: BigNumberish
   ];
-  export type OutputTuple = [from: string, to: string, value: bigint];
+  export type OutputTuple = [
+    token: string,
+    from: string,
+    to: string,
+    amount: bigint
+  ];
   export interface OutputObject {
+    token: string;
     from: string;
     to: string;
-    value: bigint;
+    amount: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -90,11 +91,11 @@ export namespace TransferEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export interface MockHTSToken extends BaseContract {
-  connect(runner?: ContractRunner | null): MockHTSToken;
+export interface MockHTS extends BaseContract {
+  connect(runner?: ContractRunner | null): MockHTS;
   waitForDeployment(): Promise<this>;
 
-  interface: MockHTSTokenInterface;
+  interface: MockHTSInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
@@ -133,28 +134,27 @@ export interface MockHTSToken extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  balanceOf: TypedContractMethod<[account: AddressLike], [bigint], "view">;
-
-  decimals: TypedContractMethod<[], [bigint], "view">;
-
-  mint: TypedContractMethod<
-    [to: AddressLike, amount: BigNumberish],
-    [void],
-    "nonpayable"
+  balanceOf: TypedContractMethod<
+    [token: AddressLike, account: AddressLike],
+    [[bigint, bigint]],
+    "view"
   >;
 
-  name: TypedContractMethod<[], [string], "view">;
-
-  symbol: TypedContractMethod<[], [string], "view">;
-
-  transferFrom: TypedContractMethod<
-    [
-      token: AddressLike,
-      from: AddressLike,
-      to: AddressLike,
-      amount: BigNumberish
-    ],
+  balances: TypedContractMethod<
+    [arg0: AddressLike, arg1: AddressLike],
     [bigint],
+    "view"
+  >;
+
+  getBalance: TypedContractMethod<
+    [token: AddressLike, account: AddressLike],
+    [bigint],
+    "view"
+  >;
+
+  setBalance: TypedContractMethod<
+    [token: AddressLike, account: AddressLike, amount: BigNumberish],
+    [void],
     "nonpayable"
   >;
 
@@ -175,33 +175,30 @@ export interface MockHTSToken extends BaseContract {
 
   getFunction(
     nameOrSignature: "balanceOf"
-  ): TypedContractMethod<[account: AddressLike], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "decimals"
-  ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "mint"
   ): TypedContractMethod<
-    [to: AddressLike, amount: BigNumberish],
-    [void],
-    "nonpayable"
+    [token: AddressLike, account: AddressLike],
+    [[bigint, bigint]],
+    "view"
   >;
   getFunction(
-    nameOrSignature: "name"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "symbol"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "transferFrom"
+    nameOrSignature: "balances"
   ): TypedContractMethod<
-    [
-      token: AddressLike,
-      from: AddressLike,
-      to: AddressLike,
-      amount: BigNumberish
-    ],
+    [arg0: AddressLike, arg1: AddressLike],
     [bigint],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "getBalance"
+  ): TypedContractMethod<
+    [token: AddressLike, account: AddressLike],
+    [bigint],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "setBalance"
+  ): TypedContractMethod<
+    [token: AddressLike, account: AddressLike, amount: BigNumberish],
+    [void],
     "nonpayable"
   >;
   getFunction(
@@ -218,23 +215,23 @@ export interface MockHTSToken extends BaseContract {
   >;
 
   getEvent(
-    key: "Transfer"
+    key: "MockTransfer"
   ): TypedContractEvent<
-    TransferEvent.InputTuple,
-    TransferEvent.OutputTuple,
-    TransferEvent.OutputObject
+    MockTransferEvent.InputTuple,
+    MockTransferEvent.OutputTuple,
+    MockTransferEvent.OutputObject
   >;
 
   filters: {
-    "Transfer(address,address,int64)": TypedContractEvent<
-      TransferEvent.InputTuple,
-      TransferEvent.OutputTuple,
-      TransferEvent.OutputObject
+    "MockTransfer(address,address,address,int64)": TypedContractEvent<
+      MockTransferEvent.InputTuple,
+      MockTransferEvent.OutputTuple,
+      MockTransferEvent.OutputObject
     >;
-    Transfer: TypedContractEvent<
-      TransferEvent.InputTuple,
-      TransferEvent.OutputTuple,
-      TransferEvent.OutputObject
+    MockTransfer: TypedContractEvent<
+      MockTransferEvent.InputTuple,
+      MockTransferEvent.OutputTuple,
+      MockTransferEvent.OutputObject
     >;
   };
 }

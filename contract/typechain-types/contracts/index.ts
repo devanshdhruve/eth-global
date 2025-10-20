@@ -7,5 +7,3 @@ import type * as hedera from "./hedera";
 export type { hedera };
 import type * as interface from "./interface";
 export type { interface };
-export type { MockHTSToken } from "./MockHTSToken";
-export type { MockReputation } from "./MockReputation";

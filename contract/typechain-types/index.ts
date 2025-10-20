@@ -12,13 +12,7 @@ export type { ReentrancyGuard } from "./@openzeppelin/contracts/utils/Reentrancy
 export { ReentrancyGuard__factory } from "./factories/@openzeppelin/contracts/utils/ReentrancyGuard__factory";
 export type { AnnotationMarketplaceHTS } from "./contracts/core/AnnotationMarketplaceHTS";
 export { AnnotationMarketplaceHTS__factory } from "./factories/contracts/core/AnnotationMarketplaceHTS__factory";
-export type { ReputationSystem } from "./contracts/core/ReputationSystem";
-export { ReputationSystem__factory } from "./factories/contracts/core/ReputationSystem__factory";
-export type { HederaTokenWrapper } from "./contracts/hedera/HederaTokenWrapper";
-export { HederaTokenWrapper__factory } from "./factories/contracts/hedera/HederaTokenWrapper__factory";
+export type { MockHTS } from "./contracts/hedera/MockHTS";
+export { MockHTS__factory } from "./factories/contracts/hedera/MockHTS__factory";
 export type { IReputationSystem } from "./contracts/interface/IReputationSystem";
 export { IReputationSystem__factory } from "./factories/contracts/interface/IReputationSystem__factory";
-export type { MockHTSToken } from "./contracts/MockHTSToken";
-export { MockHTSToken__factory } from "./factories/contracts/MockHTSToken__factory";
-export type { MockReputation } from "./contracts/MockReputation";
-export { MockReputation__factory } from "./factories/contracts/MockReputation__factory";

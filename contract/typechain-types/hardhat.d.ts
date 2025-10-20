@@ -26,25 +26,13 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.AnnotationMarketplaceHTS__factory>;
     getContractFactory(
-      name: "ReputationSystem",
+      name: "MockHTS",
       signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ReputationSystem__factory>;
-    getContractFactory(
-      name: "HederaTokenWrapper",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.HederaTokenWrapper__factory>;
+    ): Promise<Contracts.MockHTS__factory>;
     getContractFactory(
       name: "IReputationSystem",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IReputationSystem__factory>;
-    getContractFactory(
-      name: "MockHTSToken",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.MockHTSToken__factory>;
-    getContractFactory(
-      name: "MockReputation",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.MockReputation__factory>;
 
     getContractAt(
       name: "Ownable",
@@ -62,30 +50,15 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.AnnotationMarketplaceHTS>;
     getContractAt(
-      name: "ReputationSystem",
+      name: "MockHTS",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
-    ): Promise<Contracts.ReputationSystem>;
-    getContractAt(
-      name: "HederaTokenWrapper",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.HederaTokenWrapper>;
+    ): Promise<Contracts.MockHTS>;
     getContractAt(
       name: "IReputationSystem",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.IReputationSystem>;
-    getContractAt(
-      name: "MockHTSToken",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.MockHTSToken>;
-    getContractAt(
-      name: "MockReputation",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.MockReputation>;
 
     deployContract(
       name: "Ownable",
@@ -100,25 +73,13 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.AnnotationMarketplaceHTS>;
     deployContract(
-      name: "ReputationSystem",
+      name: "MockHTS",
       signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ReputationSystem>;
-    deployContract(
-      name: "HederaTokenWrapper",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HederaTokenWrapper>;
+    ): Promise<Contracts.MockHTS>;
     deployContract(
       name: "IReputationSystem",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IReputationSystem>;
-    deployContract(
-      name: "MockHTSToken",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockHTSToken>;
-    deployContract(
-      name: "MockReputation",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockReputation>;
 
     deployContract(
       name: "Ownable",
@@ -136,30 +97,15 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.AnnotationMarketplaceHTS>;
     deployContract(
-      name: "ReputationSystem",
+      name: "MockHTS",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ReputationSystem>;
-    deployContract(
-      name: "HederaTokenWrapper",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HederaTokenWrapper>;
+    ): Promise<Contracts.MockHTS>;
     deployContract(
       name: "IReputationSystem",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IReputationSystem>;
-    deployContract(
-      name: "MockHTSToken",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockHTSToken>;
-    deployContract(
-      name: "MockReputation",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockReputation>;
 
     // default types
     getContractFactory(

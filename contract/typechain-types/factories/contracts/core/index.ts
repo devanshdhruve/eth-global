@@ -2,4 +2,3 @@
 /* tslint:disable */
 /* eslint-disable */
 export { AnnotationMarketplaceHTS__factory } from "./AnnotationMarketplaceHTS__factory";
-export { ReputationSystem__factory } from "./ReputationSystem__factory";

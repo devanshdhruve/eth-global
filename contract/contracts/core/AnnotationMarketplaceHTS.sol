@@ -1,334 +1,218 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../hedera/HederaTokenWrapper.sol";
-import "../interface/IReputationSystem.sol";
 
-contract AnnotationMarketplaceHTS is ReentrancyGuard, Ownable, HederaTokenWrapper {
-    
-    IReputationSystem public reputationSystem;
-    address public asiTokenAddress;
-    
-    uint256 public projectCounter;
-    uint256 public constant APPROVALS_NEEDED = 1;
+/**
+ * @title AnnotationMarketplaceHTS
+ * @notice Escrow-based annotation marketplace using Hedera HTS on-chain transfers.
+ *
+ * Flow (escrow model):
+ * 1) Client uses Hedera SDK to approve marketplace contract as a spender for `depositAmount`.
+ * 2) Client calls createProject(totalTasks, rewardPerTask, depositAmount).
+ *    The contract pulls depositAmount tokens from client → contract (escrow).
+ * 3) Annotator submits work.
+ * 4) Client reviews → releasePayment(projectId, annotator, taskCount).
+ * 5) When project ends, remaining escrow refunded to client via completeProject().
+ */
+contract AnnotationMarketplaceHTS is Ownable, ReentrancyGuard {
+    using HederaTokenWrapper for *;
 
-    enum ProjectState { Open, Funded, InProgress, Completed, Cancelled }
-    enum ApprovalStatus { Pending, Approved, Rejected }
+    // HTS fungible token used for payments
+    address public token;
+    uint256 public nextProjectId;
+
+    // ------------------------------------------------------------------------
+    // STRUCTS
+    // ------------------------------------------------------------------------
 
     struct Project {
-        uint256 id;
-        address client;
-        string datasetURI;
-        uint256 taskReward;
-        uint256 tasksCompleted;
-        uint256 tasksTotal;
-        ProjectState state;
-        uint256 totalFunds;
-        uint256 releasedFunds;
-        uint256 createdAt;
-        uint256 deadline;
-        uint256 minReputation;
-        uint256 reputationReward;
-        bool fundsLocked;
+        address client;         // project owner (payer)
+        uint256 totalTasks;     // number of annotation tasks
+        uint256 rewardPerTask;  // per-task reward (smallest token units)
+        uint256 paidOut;        // total paid so far
+        bool completed;         // project marked complete
     }
 
-    struct Submission {
-        string uri;
-        uint256 submittedAt;
-        ApprovalStatus status;
-        mapping(address => bool) hasApproved;
-        uint256 approvalCount;
+    struct EscrowInfo {
+        uint256 totalDeposited; // total tokens deposited
+        uint256 balance;        // current tokens held in escrow
+        bool active;            // true when escrow is funded
     }
+
+    // ------------------------------------------------------------------------
+    // STATE
+    // ------------------------------------------------------------------------
 
     mapping(uint256 => Project) public projects;
-    mapping(uint256 => mapping(address => Submission)) public submissions;
-    mapping(uint256 => address[]) public projectAnnotators;
-    mapping(address => uint256[]) public clientProjects;
+    mapping(uint256 => EscrowInfo) public escrows;
+    mapping(uint256 => mapping(address => uint256)) public submittedTasks;
 
-    event ProjectCreated(uint256 indexed projectId, address indexed client, string datasetURI, uint256 tasksTotal, uint256 taskReward);
-    event ProjectFunded(uint256 indexed projectId, uint256 totalFunds);
-    event ProjectStateChanged(uint256 indexed projectId, ProjectState newState);
-    event AnnotationSubmitted(uint256 indexed projectId, address indexed annotator, string submissionURI);
-    event AnnotationApproved(uint256 indexed projectId, address indexed annotator, uint256 amount);
-    event FundsReleased(uint256 indexed projectId, address indexed annotator, uint256 amount);
-    event EmergencyRefund(uint256 indexed projectId, address indexed client, uint256 amount);
-    event ProjectCancelled(uint256 indexed projectId, address indexed client);
+    // ------------------------------------------------------------------------
+    // EVENTS
+    // ------------------------------------------------------------------------
 
-    modifier projectExists(uint256 projectId) {
-        require(projects[projectId].id != 0, "Project does not exist");
-        _;
+    event ProjectCreated(uint256 indexed projectId, address indexed client, uint256 totalTasks, uint256 rewardPerTask, uint256 deposit);
+    event WorkSubmitted(uint256 indexed projectId, address indexed annotator, uint256 taskCount);
+    event PaymentReleased(uint256 indexed projectId, address indexed annotator, uint256 amount);
+    event ProjectCompleted(uint256 indexed projectId, uint256 refunded);
+
+    // ------------------------------------------------------------------------
+    // CONSTRUCTOR
+    // ------------------------------------------------------------------------
+
+    constructor(address _token) Ownable(msg.sender) {
+        require(_token != address(0), "invalid token");
+        token = _token;
     }
 
-    modifier onlyClient(uint256 projectId) {
-        require(msg.sender == projects[projectId].client, "Only client can call");
-        _;
-    }
+    // ------------------------------------------------------------------------
+    // 1️⃣ PROJECT CREATION + ESCROW FUNDING
+    // ------------------------------------------------------------------------
 
-    modifier projectInState(uint256 projectId, ProjectState state) {
-        require(projects[projectId].state == state, "Invalid project state");
-        _;
-    }
+    function createProject(uint256 totalTasks, uint256 rewardPerTask, uint256 depositAmount)
+        external
+        nonReentrant
+        returns (uint256)
+    {
+        require(totalTasks > 0, "invalid totalTasks");
+        require(rewardPerTask > 0, "invalid reward");
+        require(depositAmount == totalTasks * rewardPerTask, "deposit mismatch");
 
-    constructor(address _asiTokenAddress, address _reputationAddress) Ownable(msg.sender) {
-        require(_asiTokenAddress != address(0), "Invalid token address");
-        require(_reputationAddress != address(0), "Invalid reputation address");
-        asiTokenAddress = _asiTokenAddress;
-        reputationSystem = IReputationSystem(_reputationAddress);
-    }
-
-    function createProject(
-        string calldata datasetURI,
-        uint256 tasksTotal,
-        uint256 taskReward,
-        uint256 deadline,
-        uint256 minReputation,
-        uint256 reputationReward
-    ) external returns (uint256) {
-        require(tasksTotal > 0, "Must have at least one task");
-        require(taskReward > 0, "Reward cannot be zero");
-        require(deadline > block.timestamp, "Deadline must be in future");
-        require(reputationReward > 0, "Reputation reward must be positive");
-        
-        projectCounter++;
-        uint256 newProjectId = projectCounter;
-
-        projects[newProjectId] = Project({
-            id: newProjectId,
+        uint256 projectId = nextProjectId++;
+        projects[projectId] = Project({
             client: msg.sender,
-            datasetURI: datasetURI,
-            taskReward: taskReward,
-            tasksCompleted: 0,
-            tasksTotal: tasksTotal,
-            state: ProjectState.Open,
-            totalFunds: 0,
-            releasedFunds: 0,
-            createdAt: block.timestamp,
-            deadline: deadline,
-            minReputation: minReputation,
-            reputationReward: reputationReward,
-            fundsLocked: false
+            totalTasks: totalTasks,
+            rewardPerTask: rewardPerTask,
+            paidOut: 0,
+            completed: false
         });
 
-        clientProjects[msg.sender].push(newProjectId);
-        emit ProjectCreated(newProjectId, msg.sender, datasetURI, tasksTotal, taskReward);
-        emit ProjectStateChanged(newProjectId, ProjectState.Open);
-        
-        return newProjectId;
+        // Transfer tokens from client → contract (escrow)
+        int64 amt = HederaTokenWrapper.toInt64(depositAmount);
+        bool ok = HederaTokenWrapper.transferFromToken(token, msg.sender, address(this), amt);
+        require(ok, "HTS transferFrom failed");
+
+        escrows[projectId] = EscrowInfo({
+            totalDeposited: depositAmount,
+            balance: depositAmount,
+            active: true
+        });
+
+        emit ProjectCreated(projectId, msg.sender, totalTasks, rewardPerTask, depositAmount);
+        return projectId;
     }
 
-    function depositFunds(uint256 projectId, int64 amount) 
-        external 
+    // ------------------------------------------------------------------------
+    // 2️⃣ WORK SUBMISSION
+    // ------------------------------------------------------------------------
+
+    function submitWork(uint256 projectId, uint256 taskCount) external nonReentrant {
+        require(taskCount > 0, "taskCount zero");
+        Project storage p = projects[projectId];
+        require(p.client != address(0), "project not found");
+        require(!p.completed, "project completed");
+        require(escrows[projectId].active, "escrow inactive");
+
+        submittedTasks[projectId][msg.sender] += taskCount;
+        emit WorkSubmitted(projectId, msg.sender, taskCount);
+    }
+
+    // ------------------------------------------------------------------------
+    // 3️⃣ ESCROW RELEASE TO ANNOTATOR
+    // ------------------------------------------------------------------------
+
+    function releasePayment(uint256 projectId, address annotator, uint256 taskCount)
+        external
         nonReentrant
-        projectExists(projectId)
-        onlyClient(projectId)
-        projectInState(projectId, ProjectState.Open)
     {
-        require(amount > 0, "Amount must be positive");
-        Project storage project = projects[projectId];
+        require(taskCount > 0, "taskCount zero");
+        Project storage p = projects[projectId];
+        EscrowInfo storage e = escrows[projectId];
 
-        // Transfer HTS tokens from client to this contract (escrow)
-        bool success = htsTransferFrom(asiTokenAddress, msg.sender, address(this), amount);
-        require(success, "HTS transfer failed");
+        require(p.client != address(0), "project not found");
+        require(!p.completed, "project completed");
+        require(msg.sender == p.client, "only client can release");
+        require(e.active && e.balance > 0, "escrow empty or inactive");
 
-        // Update escrow balance
-        project.totalFunds += uint256(uint64(amount));
+        uint256 amount = taskCount * p.rewardPerTask;
+        require(amount <= e.balance, "insufficient escrow");
+        require(submittedTasks[projectId][annotator] >= taskCount, "insufficient submitted tasks");
 
-        // Check if fully funded
-        uint256 totalRequired = project.tasksTotal * project.taskReward;
-        if (project.totalFunds >= totalRequired) {
-            project.state = ProjectState.Funded;
-            emit ProjectFunded(projectId, project.totalFunds);
-            emit ProjectStateChanged(projectId, ProjectState.Funded);
-        }
+        // accounting
+        submittedTasks[projectId][annotator] -= taskCount;
+        e.balance -= amount;
+        p.paidOut += amount;
+
+        // transfer tokens contract → annotator
+        int64 amt = HederaTokenWrapper.toInt64(amount);
+        bool ok = HederaTokenWrapper.transferToken(token, address(this), annotator, amt);
+        require(ok, "HTS transfer failed");
+
+        emit PaymentReleased(projectId, annotator, amount);
     }
 
-    function submitAnnotation(uint256 projectId, string calldata submissionURI) 
-        external 
-        nonReentrant
-        projectExists(projectId)
-    {
-        Project storage project = projects[projectId];
-        
-        require(
-            project.state == ProjectState.Funded || project.state == ProjectState.InProgress,
-            "Project not accepting submissions"
-        );
-        require(submissions[projectId][msg.sender].submittedAt == 0, "Already submitted");
-        require(reputationSystem.getReputation(msg.sender) >= project.minReputation, "Insufficient reputation");
-        
-        // ADDED: Check escrow has enough funds for this task
-        require(_getProjectAvailableFunds(projectId) >= project.taskReward, "Insufficient escrow funds");
+    // ------------------------------------------------------------------------
+    // 4️⃣ COMPLETE PROJECT + REFUND REMAINING ESCROW
+    // ------------------------------------------------------------------------
 
-        submissions[projectId][msg.sender].uri = submissionURI;
-        submissions[projectId][msg.sender].submittedAt = block.timestamp;
-        submissions[projectId][msg.sender].status = ApprovalStatus.Pending;
+    function completeProject(uint256 projectId) external nonReentrant {
+        Project storage p = projects[projectId];
+        EscrowInfo storage e = escrows[projectId];
 
-        projectAnnotators[projectId].push(msg.sender);
+        require(p.client != address(0), "project not found");
+        require(!p.completed, "already completed");
+        require(msg.sender == p.client, "only client");
 
-        if (project.state == ProjectState.Funded) {
-            project.state = ProjectState.InProgress;
-            emit ProjectStateChanged(projectId, ProjectState.InProgress);
+        uint256 remaining = e.balance;
+
+        if (remaining > 0) {
+            e.balance = 0;
+            int64 amt = HederaTokenWrapper.toInt64(remaining);
+            bool ok = HederaTokenWrapper.transferToken(token, address(this), p.client, amt);
+            require(ok, "HTS refund failed");
         }
 
-        if (!project.fundsLocked) {
-            project.fundsLocked = true;
-        }
+        p.completed = true;
+        e.active = false;
 
-        emit AnnotationSubmitted(projectId, msg.sender, submissionURI);
+        emit ProjectCompleted(projectId, remaining);
     }
 
-    function approveAnnotation(uint256 projectId, address annotator) 
-        external 
-        nonReentrant
-        projectExists(projectId)
-        onlyClient(projectId)
-    {
-        Project storage project = projects[projectId];
-        Submission storage submission = submissions[projectId][annotator];
-    
-        require(submission.submittedAt > 0, "No submission found");
-        require(submission.status == ApprovalStatus.Pending, "Already processed");
-        require(!submission.hasApproved[msg.sender], "Already approved");
-        
-        // ADDED: Verify escrow has funds before approval
-        require(
-            _getProjectAvailableFunds(projectId) >= project.taskReward,
-            "Insufficient funds in escrow"
-        );
+    // ------------------------------------------------------------------------
+    // VIEW HELPERS
+    // ------------------------------------------------------------------------
 
-        submission.hasApproved[msg.sender] = true;
-        submission.approvalCount++;
-
-        if (submission.approvalCount >= APPROVALS_NEEDED) {
-            _releasePayment(projectId, annotator);
-            submission.status = ApprovalStatus.Approved;
-            project.tasksCompleted++;
-
-            emit AnnotationApproved(projectId, annotator, project.taskReward);
-        }
-
-        if (project.tasksCompleted == project.tasksTotal) {
-            project.state = ProjectState.Completed;
-            emit ProjectStateChanged(projectId, ProjectState.Completed);
-        }
-    }
-
-    /**
-     * @notice Release payment from escrow using HTS transfer
-     * @dev Follows CEI pattern: Checks-Effects-Interactions
-     */
-    function _releasePayment(uint256 projectId, address annotator) internal {
-        Project storage project = projects[projectId];
-        uint256 paymentAmount = project.taskReward;
-
-        // CHECKS: Verify escrow has sufficient funds
-        uint256 availableFunds = _getProjectAvailableFunds(projectId);
-        require(availableFunds >= paymentAmount, "Insufficient escrow balance");
-
-        // EFFECTS: Update state before external calls
-        project.releasedFunds += paymentAmount;
-
-        // INTERACTIONS: External calls last
-        bool success = htsTransfer(asiTokenAddress, annotator, int64(uint64(paymentAmount)));
-        require(success, "HTS payment failed");
-
-        reputationSystem.awardReputation(annotator, project.reputationReward);
-
-        emit FundsReleased(projectId, annotator, paymentAmount);
-    }
-
-    /**
-     * @notice ADDED: Emergency refund for cancelled/expired projects
-     * @dev Allows client to recover unused funds after deadline
-     */
-    function emergencyRefund(uint256 projectId) 
-        external 
-        nonReentrant
-        projectExists(projectId)
-        onlyClient(projectId)
-    {
-        Project storage project = projects[projectId];
-        
-        require(block.timestamp > project.deadline, "Deadline not reached");
-        require(project.state != ProjectState.Completed, "Project already completed");
-
-        uint256 refundAmount = _getProjectAvailableFunds(projectId);
-        require(refundAmount > 0, "No funds to refund");
-
-        // Update state
-        project.state = ProjectState.Cancelled;
-        
-        // Transfer remaining escrow back to client
-        bool success = htsTransfer(asiTokenAddress, project.client, int64(uint64(refundAmount)));
-        require(success, "Refund transfer failed");
-
-        emit EmergencyRefund(projectId, project.client, refundAmount);
-        emit ProjectCancelled(projectId, project.client);
-        emit ProjectStateChanged(projectId, ProjectState.Cancelled);
-    }
-
-    /**
-     * @notice ADDED: Calculate available funds in escrow
-     * @dev Available = Total deposited - Already released
-     */
-    function _getProjectAvailableFunds(uint256 projectId) internal view returns (uint256) {
-        Project storage project = projects[projectId];
-        return project.totalFunds - project.releasedFunds;
-    }
-
-    /**
-     * @notice ADDED: Public view function for escrow balance
-     */
-    function getProjectAvailableFunds(uint256 projectId) 
-        external 
-        view 
-        projectExists(projectId) 
-        returns (uint256) 
-    {
-        return _getProjectAvailableFunds(projectId);
-    }
-
-    function getProjectDetails(uint256 projectId) 
-        external 
-        view 
-        projectExists(projectId) 
+    function getProject(uint256 projectId)
+        external
+        view
         returns (
-            uint256 id,
             address client,
-            string memory datasetURI,
-            uint256 taskReward,
-            uint256 tasksCompleted,
-            uint256 tasksTotal,
-            ProjectState state,
-            uint256 totalFunds,
-            uint256 releasedFunds,
-            uint256 availableFunds,
-            uint256 createdAt,
-            uint256 deadline,
-            uint256 minReputation
+            uint256 totalTasks,
+            uint256 rewardPerTask,
+            uint256 paidOut,
+            bool completed,
+            uint256 totalDeposited,
+            uint256 balance
         )
     {
-        Project storage project = projects[projectId];
+        Project storage p = projects[projectId];
+        EscrowInfo storage e = escrows[projectId];
+        require(p.client != address(0), "project not found");
         return (
-            project.id,
-            project.client,
-            project.datasetURI,
-            project.taskReward,
-            project.tasksCompleted,
-            project.tasksTotal,
-            project.state,
-            project.totalFunds,
-            project.releasedFunds,
-            _getProjectAvailableFunds(projectId),
-            project.createdAt,
-            project.deadline,
-            project.minReputation
+            p.client,
+            p.totalTasks,
+            p.rewardPerTask,
+            p.paidOut,
+            p.completed,
+            e.totalDeposited,
+            e.balance
         );
     }
 
-    function getClientProjects(address client) external view returns (uint256[] memory) {
-        return clientProjects[client];
+    function getSubmitted(uint256 projectId, address annotator) external view returns (uint256) {
+        return submittedTasks[projectId][annotator];
     }
 }

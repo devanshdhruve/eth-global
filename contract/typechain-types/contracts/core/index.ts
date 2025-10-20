@@ -2,4 +2,3 @@
 /* tslint:disable */
 /* eslint-disable */
 export type { AnnotationMarketplaceHTS } from "./AnnotationMarketplaceHTS";
-export type { ReputationSystem } from "./ReputationSystem";

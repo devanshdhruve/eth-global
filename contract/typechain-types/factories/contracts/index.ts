@@ -4,5 +4,3 @@
 export * as core from "./core";
 export * as hedera from "./hedera";
 export * as interface from "./interface";
-export { MockHTSToken__factory } from "./MockHTSToken__factory";
-export { MockReputation__factory } from "./MockReputation__factory";
