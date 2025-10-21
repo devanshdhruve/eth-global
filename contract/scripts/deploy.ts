@@ -3,8 +3,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 async function main() {
-  const tokenAddress = process.env.ASI_TOKEN_ID!;
-  if (!tokenAddress) throw new Error("❌ Missing ASI_TOKEN_ID in .env");
+  const tokenAddress = process.env.ASI_TOKEN_ADDRESS!;
+  if (!tokenAddress) throw new Error("❌ Missing ASI_TOKEN_ADDRESS in .env");
 
   console.log("🚀 Deploying AnnotationMarketplaceHTS with token:", tokenAddress);
 
