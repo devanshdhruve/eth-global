@@ -79,10 +79,10 @@ export default function Home() {
             className="flex flex-col sm:flex-row gap-4 justify-center"
           >
             <Link
-              href="/projects"
+              href="/login"
               className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 flex items-center justify-center gap-2 neon-glow"
             >
-              Start Annotating <ArrowRight size={20} />
+              Get Started <ArrowRight size={20} />
             </Link>
             <Link
               href="/projects"
@@ -169,7 +169,7 @@ export default function Home() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
-              href="/projects"
+              href="/login"
               className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow"
             >
               Get Started
