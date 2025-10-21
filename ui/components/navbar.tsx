@@ -1,22 +1,63 @@
 "use client"
 
 import Link from "next/link"
-import { Menu, X } from "lucide-react"
+import { Menu, X, LogOut } from "lucide-react"
 import { useState } from "react"
+import { useAuth } from "@/app/auth/context"
+import { useRouter } from "next/navigation"
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
+  const { role, isAuthenticated, setRole, setIsAuthenticated } = useAuth()
+  const router = useRouter()
 
-  const links = [
-    { href: "/", label: "Home" },
-    { href: "/projects", label: "Projects" },
-    { href: "/annotate", label: "Annotate" },
-    { href: "/reputation", label: "Reputation" },
-    { href: "/wallet", label: "Wallet" },
-    { href: "/verify", label: "Verify" },
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/about", label: "About" },
-  ]
+  const getNavLinks = () => {
+    const baseLinks = [{ href: "/", label: "Home" }]
+
+    if (!isAuthenticated) {
+      return [...baseLinks, { href: "/login", label: "Login" }]
+    }
+
+    if (role === "annotator") {
+      return [
+        ...baseLinks,
+        { href: "/projects", label: "Projects" },
+        { href: "/annotate", label: "Annotate" },
+        { href: "/reputation", label: "Reputation" },
+        { href: "/wallet", label: "Wallet" },
+        { href: "/verify", label: "Verify" },
+        { href: "/dashboard", label: "Dashboard" },
+      ]
+    }
+
+    if (role === "reviewer") {
+      return [
+        ...baseLinks,
+        { href: "/reviewer/dashboard", label: "Dashboard" },
+        { href: "/reviewer/queue", label: "Review Queue" },
+        { href: "/reviewer/team", label: "Team" },
+        { href: "/reviewer/analytics", label: "Analytics" },
+      ]
+    }
+
+    if (role === "client") {
+      return [
+        ...baseLinks,
+        { href: "/client/dashboard", label: "Dashboard" },
+        { href: "/client/create-project", label: "New Project" },
+      ]
+    }
+
+    return baseLinks
+  }
+
+  const links = getNavLinks()
+
+  const handleLogout = () => {
+    setRole(null)
+    setIsAuthenticated(false)
+    router.push("/")
+  }
 
   return (
     <nav className="sticky top-0 z-50 bg-white/5 backdrop-blur-md border-b border-white/10">
@@ -40,9 +81,24 @@ export function Navbar() {
             ))}
           </div>
 
-          <button className="hidden md:block px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow">
-            Connect Wallet
-          </button>
+          <div className="hidden md:flex items-center gap-4">
+            {isAuthenticated && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-foreground/70 capitalize">{role}</span>
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 border border-white/20 rounded-lg font-semibold hover:bg-white/5 transition-all duration-300 flex items-center gap-2"
+                >
+                  <LogOut size={16} /> Logout
+                </button>
+              </div>
+            )}
+            {!isAuthenticated && (
+              <button className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow">
+                Connect Wallet
+              </button>
+            )}
+          </div>
 
           {/* Mobile Menu Button */}
           <button className="md:hidden" onClick={() => setIsOpen(!isOpen)}>
@@ -62,9 +118,24 @@ export function Navbar() {
                 {link.label}
               </Link>
             ))}
-            <button className="w-full mt-4 px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white">
-              Connect Wallet
-            </button>
+            <div className="pt-4 border-t border-white/10 space-y-2">
+              {isAuthenticated && (
+                <>
+                  <div className="px-4 py-2 text-sm text-foreground/70 capitalize">Role: {role}</div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full px-4 py-2 border border-white/20 rounded-lg font-semibold hover:bg-white/5 transition-all duration-300 flex items-center justify-center gap-2"
+                  >
+                    <LogOut size={16} /> Logout
+                  </button>
+                </>
+              )}
+              {!isAuthenticated && (
+                <button className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white">
+                  Connect Wallet
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
