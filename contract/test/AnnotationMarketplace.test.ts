@@ -22,7 +22,7 @@ describe("AnnotationMarketplaceHTS", function () {
     await token.waitForDeployment();
     console.log("✅ MockHTS deployed at:", await token.getAddress());
 
-    // 2️⃣ Deploy AnnotationMarketplaceHTS with mock token address
+    // 2️⃣ Deploy AnnotationMarketplaceMock with mock token address
     const Marketplace = await ethers.getContractFactory("AnnotationMarketplaceMock");
     marketplace = await Marketplace.deploy(await token.getAddress());
     await marketplace.waitForDeployment();
