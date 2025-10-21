@@ -29,10 +29,19 @@ const config: HardhatUserConfig = {
       ? [process.env.HEDERA_TESTNET_PRIVATE_KEY]
       : [],
       gas: 10_000_000,
-      gasPrice: 490_000_000_000, // ✅ Minimum required (490 gwei)
+      gasPrice: 520_000_000_000, // ✅ Above minimum (520 gwei)
       timeout: 120_000,
     },
 
+
+    // Ethereum Sepolia (for Blockscout visibility)
+    "sepolia": {
+      url: process.env.SEPOLIA_RPC_URL || "https://sepolia.infura.io/v3/YOUR_INFURA_KEY",
+      chainId: 11155111,
+      accounts: process.env.ETHEREUM_PRIVATE_KEY
+        ? [process.env.ETHEREUM_PRIVATE_KEY]
+        : [],
+    },
 
     // Hedera Mainnet (when ready for production)
     "hedera-mainnet": {
