@@ -1,12 +1,18 @@
 "use client"
 
 import type React from "react"
-
-import { Navbar } from "@/components/navbar"
-import { Footer } from "@/components/footer"
+import { useState } from "react"
 import { motion } from "framer-motion"
 import { Upload, ArrowRight } from "lucide-react"
-import { useState } from "react"
+import { Navbar } from "@/components/navbar"
+import { Footer } from "@/components/footer"
+
+interface Task {
+  id: number
+  raw: string
+  ipfsHash: string
+  status: "pending" | "uploading" | "uploaded" | "failed"
+}
 
 export default function CreateProject() {
   const [step, setStep] = useState(1)
@@ -18,8 +24,12 @@ export default function CreateProject() {
     annotators: "",
     deadline: "",
   })
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [uploading, setUploading] = useState(false)
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
@@ -30,6 +40,50 @@ export default function CreateProject() {
 
   const handlePrev = () => {
     if (step > 1) setStep(step - 1)
+  }
+
+  // -----------------------------
+  // Step 3: File Upload Handler
+  // -----------------------------
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    setTasks([]) // reset tasks
+
+    try {
+      const formDataToSend = new FormData()
+      formDataToSend.append("file", file)
+      formDataToSend.append(
+        "projectId",
+        formData.projectName || `project-${Date.now()}`
+      )
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formDataToSend,
+      })
+
+      if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`)
+
+      const data = await res.json()
+
+      // Map backend tasks to frontend state
+      const mappedTasks: Task[] = data.tasks.map((t: any, i: number) => ({
+        id: i + 1,
+        raw: t.raw,
+        ipfsHash: t.cid,
+        status: t.cid ? "uploaded" : "failed",
+      }))
+
+      setTasks(mappedTasks)
+    } catch (err: any) {
+      console.error("Upload failed", err)
+      alert("Upload failed: " + err.message)
+    } finally {
+      setUploading(false)
+    }
   }
 
   return (
@@ -79,10 +133,10 @@ export default function CreateProject() {
           transition={{ duration: 0.6 }}
           className="glass p-8"
         >
+          {/* Step 1: Project Details */}
           {step === 1 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold mb-6">Project Details</h2>
-
               <div>
                 <label className="block text-sm font-medium mb-2">Project Name</label>
                 <input
@@ -125,10 +179,10 @@ export default function CreateProject() {
             </div>
           )}
 
+          {/* Step 2: Budget & Resources */}
           {step === 2 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold mb-6">Budget & Resources</h2>
-
               <div className="grid md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium mb-2">Budget (ASI Tokens)</label>
@@ -168,22 +222,47 @@ export default function CreateProject() {
             </div>
           )}
 
+          {/* Step 3: Upload Dataset */}
           {step === 3 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold mb-6">Upload Dataset</h2>
 
-              <div className="border-2 border-dashed border-white/20 rounded-lg p-12 text-center hover:border-blue-500/50 transition-all duration-300 cursor-pointer">
+              <div className="relative border-2 border-dashed border-white/20 rounded-lg p-12 text-center hover:border-blue-500/50 transition-all duration-300 cursor-pointer">
                 <Upload className="w-12 h-12 mx-auto mb-4 text-blue-400" />
                 <h3 className="text-lg font-semibold mb-2">Upload your dataset</h3>
                 <p className="text-foreground/60 mb-4">Drag and drop your files or click to browse</p>
-                <button className="px-6 py-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-all duration-300">
-                  Choose Files
+                <input
+                  type="file"
+                  accept=".csv,.json"
+                  onChange={handleFileUpload}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  disabled={uploading}
+                />
+                <button
+                  className="px-6 py-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-all duration-300"
+                  disabled={uploading}
+                >
+                  {uploading ? "Uploading..." : "Choose Files"}
                 </button>
               </div>
 
               <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-                <p className="text-sm text-foreground/60">Supported formats: CSV, JSON, ZIP • Max file size: 500MB</p>
+                <p className="text-sm text-foreground/60">Supported formats: CSV, JSON • Max file size: 500MB</p>
               </div>
+
+              {/* Display uploaded tasks */}
+              {tasks.length > 0 && (
+                <div className="mt-6">
+                  <h4 className="text-lg font-semibold mb-2">Uploaded Tasks</h4>
+                  <ul className="space-y-1 max-h-64 overflow-y-auto">
+                    {tasks.map((t) => (
+                      <li key={t.id} className="text-sm text-foreground/80">
+                        Task {t.id}: {t.ipfsHash} ({t.status})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 
