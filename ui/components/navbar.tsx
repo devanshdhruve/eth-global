@@ -130,24 +130,27 @@ export function Navbar() {
               </div>
             )}
 
-            {/* Wallet connect button — independent of isAuthenticated */}
-            <button
-              onClick={() => {
-                if (walletAddress) {
-                // Disconnect wallet
-                setWalletAddress(null)
-                localStorage.removeItem("connectedWallet")
-                } else {
-                  // Connect wallet
-                  connectWallet()
+            {/* Wallet connect button — only visible after login */}
+            {isAuthenticated && (
+              <button
+                onClick={() => {
+                  if (walletAddress) {
+                    // Disconnect wallet
+                    setWalletAddress(null)
+                    localStorage.removeItem("connectedWallet")
+                  } else {
+                    // Connect wallet
+                    connectWallet()
+                  }
+                }}
+                className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow"
+              >
+                {walletAddress
+                  ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+                  : "Connect Wallet"
                 }
-              }}
-              className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow"
-            >
-            {walletAddress
-              ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-              : "Connect Wallet"}
-            </button>
+              </button>
+            )}
           </div>
 
 
@@ -181,7 +184,7 @@ export function Navbar() {
                   </button>
                 </>
               )}
-              {
+              {isAuthenticated && (
                 <button
                   onClick={() => {
                     if(walletAddress) {
@@ -195,9 +198,9 @@ export function Navbar() {
                 >
                   {walletAddress
                     ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-                    : "Connect Wallet"}
+                      : "Connect Wallet"}
                 </button>
-              }
+              )}
             </div>
           </div>
         )}
