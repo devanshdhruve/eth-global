@@ -2,14 +2,55 @@
 
 import Link from "next/link"
 import { Menu, X, LogOut } from "lucide-react"
-import { useState } from "react"
+import { useEffect ,useState } from "react"
 import { useAuth } from "@/app/auth/context"
 import { useRouter } from "next/navigation"
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
+  const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const { role, isAuthenticated, setRole, setIsAuthenticated } = useAuth()
   const router = useRouter()
+
+  useEffect(() => {
+    const savedWallet = localStorage.getItem("connectedWallet")
+    if (savedWallet) setWalletAddress(savedWallet)
+  }, [])
+
+  useEffect(() => {
+    if (walletAddress) {
+      localStorage.setItem("connectedWallet", walletAddress)
+    }
+  }, [walletAddress])
+
+
+  const connectWallet = async() => {
+    if(typeof window === "undefined") return
+    if(!window.ethereum) {
+      alert("Please install MetaMask to connect your wallet.")
+      return
+    }
+
+    try {
+      const accounts = await window.ethereum.request({
+      method: "eth_requestAccounts",
+    })
+     
+    const address = accounts[0]
+    setWalletAddress(address)
+    setIsAuthenticated(true)
+    console.log("Connected wallet address:", address)
+    } catch (err: any) {
+      console.error("Wallet connection failed:", err)
+      alert("Failed to connect wallet: " + err.message)
+    }
+  } 
+
+  const handleLogout = () => {
+    setRole(null)
+    setIsAuthenticated(false)
+    router.push("/")
+  }
 
   const getNavLinks = () => {
     const baseLinks = [{ href: "/", label: "Home" }]
@@ -53,12 +94,6 @@ export function Navbar() {
 
   const links = getNavLinks()
 
-  const handleLogout = () => {
-    setRole(null)
-    setIsAuthenticated(false)
-    router.push("/")
-  }
-
   return (
     <nav className="sticky top-0 z-50 bg-white/5 backdrop-blur-md border-b border-white/10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -82,6 +117,7 @@ export function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-4">
+            {/* Role + Logout only for email-authenticated users */}
             {isAuthenticated && (
               <div className="flex items-center gap-3">
                 <span className="text-sm text-foreground/70 capitalize">{role}</span>
@@ -93,12 +129,27 @@ export function Navbar() {
                 </button>
               </div>
             )}
-            {!isAuthenticated && (
-              <button className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow">
-                Connect Wallet
-              </button>
-            )}
+
+            {/* Wallet connect button — independent of isAuthenticated */}
+            <button
+              onClick={() => {
+                if (walletAddress) {
+                // Disconnect wallet
+                setWalletAddress(null)
+                localStorage.removeItem("connectedWallet")
+                } else {
+                  // Connect wallet
+                  connectWallet()
+                }
+              }}
+              className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow"
+            >
+            {walletAddress
+              ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+              : "Connect Wallet"}
+            </button>
           </div>
+
 
           {/* Mobile Menu Button */}
           <button className="md:hidden" onClick={() => setIsOpen(!isOpen)}>
@@ -130,11 +181,23 @@ export function Navbar() {
                   </button>
                 </>
               )}
-              {!isAuthenticated && (
-                <button className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white">
-                  Connect Wallet
+              {
+                <button
+                  onClick={() => {
+                    if(walletAddress) {
+                      setWalletAddress(null)
+                      localStorage.removeItem("connectedWallet")
+                    } else {
+                      connectWallet()
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white"
+                >
+                  {walletAddress
+                    ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+                    : "Connect Wallet"}
                 </button>
-              )}
+              }
             </div>
           </div>
         )}
