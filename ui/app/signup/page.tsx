@@ -1,34 +1,26 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { motion } from "framer-motion"
 import { ArrowRight, Users, CheckCircle, Briefcase } from "lucide-react"
 import Link from "next/link"
-import { useSignIn, useUser } from "@clerk/nextjs"
-import { useUserRole } from "@/hooks/useUserRole"
+import { useSignUp } from "@clerk/nextjs"
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter()
-  const { signIn, isLoaded, setActive } = useSignIn()
-  const { user } = useUser()
-  const { role } = useUserRole()
+  const { signUp, isLoaded, setActive } = useSignUp()
   
   const [selectedRole, setSelectedRole] = useState<"annotator" | "reviewer" | "client" | null>(null)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
-
-  // Redirect if already logged in with a role
-  useEffect(() => {
-    if (user && role) {
-      redirectBasedOnRole(role)
-    }
-  }, [user, role])
+  const [verifying, setVerifying] = useState(false)
+  const [code, setCode] = useState("")
 
   const roles = [
     {
@@ -67,7 +59,7 @@ export default function LoginPage() {
     }
   }
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!isLoaded || !selectedRole || !email || !password) return
 
@@ -75,28 +67,52 @@ export default function LoginPage() {
     setError("")
 
     try {
-      // Sign in with Clerk
-      const result = await signIn.create({
-        identifier: email,
+      // Create the user with Clerk
+      await signUp.create({
+        emailAddress: email,
         password: password,
       })
 
-      if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId })
+      // Send verification email
+      await signUp.prepareEmailAddressVerification({ strategy: "email_code" })
+      
+      setVerifying(true)
+    } catch (err: any) {
+      console.error("Signup error:", err)
+      setError(err.errors?.[0]?.message || "Signup failed. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
-        // Update user's role in Clerk metadata
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!isLoaded) return
+
+    setIsLoading(true)
+    setError("")
+
+    try {
+      const completeSignUp = await signUp.attemptEmailAddressVerification({
+        code,
+      })
+
+      if (completeSignUp.status === "complete") {
+        await setActive({ session: completeSignUp.createdSessionId })
+
+        // Set the user's role
         await fetch("/api/set-role", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ role: selectedRole }),
         })
 
-        // Redirect based on selected role
-        redirectBasedOnRole(selectedRole)
+        // Redirect based on role
+        redirectBasedOnRole(selectedRole!)
       }
     } catch (err: any) {
-      console.error("Login error:", err)
-      setError(err.errors?.[0]?.message || "Login failed. Please try again.")
+      console.error("Verification error:", err)
+      setError(err.errors?.[0]?.message || "Verification failed. Please try again.")
     } finally {
       setIsLoading(false)
     }
@@ -135,12 +151,12 @@ export default function LoginPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: i * 0.2 }}
-                onClick={() => setSelectedRole(role.id as any)}
+                onClick={() => !verifying && setSelectedRole(role.id as any)}
                 className={`cursor-pointer glass transition-all duration-300 p-8 group ${
                   selectedRole === role.id
                     ? "ring-2 ring-blue-500 bg-white/10 border-white/20"
                     : "hover:bg-white/10 hover:border-white/20"
-                }`}
+                } ${verifying ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <role.icon
                   className={`w-12 h-12 mb-4 transition-colors ${
@@ -161,8 +177,8 @@ export default function LoginPage() {
             ))}
           </div>
 
-          {/* Login Form */}
-          {selectedRole && (
+          {/* Signup Form */}
+          {selectedRole && !verifying && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -170,7 +186,7 @@ export default function LoginPage() {
               className="max-w-md mx-auto glass p-8"
             >
               <h2 className="text-2xl font-bold mb-6 text-center">
-                Login as {roles.find((r) => r.id === selectedRole)?.title}
+                Sign up as {roles.find((r) => r.id === selectedRole)?.title}
               </h2>
 
               {error && (
@@ -179,7 +195,7 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <form onSubmit={handleLogin} className="space-y-4">
+              <form onSubmit={handleSignup} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Email</label>
                   <input
@@ -209,7 +225,7 @@ export default function LoginPage() {
                   disabled={isLoading || !isLoaded}
                   className="w-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white py-2 hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 neon-glow flex items-center justify-center gap-2"
                 >
-                  {isLoading ? "Logging in..." : "Login"} {!isLoading && <ArrowRight size={18} />}
+                  {isLoading ? "Creating account..." : "Sign Up"} {!isLoading && <ArrowRight size={18} />}
                 </button>
 
                 <button
@@ -222,15 +238,58 @@ export default function LoginPage() {
               </form>
 
               <p className="text-center text-sm text-foreground/60 mt-6">
-                Don't have an account?{" "}
-                <Link href="/signup" className="text-blue-400 hover:text-blue-300">
-                  Sign up here
+                Already have an account?{" "}
+                <Link href="/login" className="text-blue-400 hover:text-blue-300">
+                  Login here
                 </Link>
               </p>
             </motion.div>
           )}
 
-          {!selectedRole && (
+          {/* Verification Form */}
+          {verifying && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+              className="max-w-md mx-auto glass p-8"
+            >
+              <h2 className="text-2xl font-bold mb-6 text-center">Verify Your Email</h2>
+              <p className="text-foreground/70 text-center mb-6">
+                We sent a verification code to <strong>{email}</strong>
+              </p>
+
+              {error && (
+                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+
+              <form onSubmit={handleVerify} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Verification Code</label>
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="Enter 6-digit code"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all text-center text-2xl tracking-widest"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading || !isLoaded}
+                  className="w-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white py-2 hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 neon-glow flex items-center justify-center gap-2"
+                >
+                  {isLoading ? "Verifying..." : "Verify & Continue"} {!isLoading && <ArrowRight size={18} />}
+                </button>
+              </form>
+            </motion.div>
+          )}
+
+          {!selectedRole && !verifying && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

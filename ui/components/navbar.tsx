@@ -2,14 +2,17 @@
 
 import Link from "next/link"
 import { Menu, X, LogOut } from "lucide-react"
-import { useEffect ,useState } from "react"
-import { useAuth } from "@/app/auth/context"
+import { useEffect, useState } from "react"
+import { useUserRole } from "@/hooks/useUserRole"
+import { useClerk, useUser } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  const { role, isAuthenticated, setRole, setIsAuthenticated } = useAuth()
+  const { role } = useUserRole()
+  const { isSignedIn } = useUser()
+  const { signOut } = useClerk()
   const router = useRouter()
 
   useEffect(() => {
@@ -23,39 +26,38 @@ export function Navbar() {
     }
   }, [walletAddress])
 
-
-  const connectWallet = async() => {
-    if(typeof window === "undefined") return
-    if(!window.ethereum) {
+  const connectWallet = async () => {
+    if (typeof window === "undefined") return
+    if (!window.ethereum) {
       alert("Please install MetaMask to connect your wallet.")
       return
     }
 
     try {
       const accounts = await window.ethereum.request({
-      method: "eth_requestAccounts",
-    })
-     
-    const address = accounts[0]
-    setWalletAddress(address)
-    setIsAuthenticated(true)
-    console.log("Connected wallet address:", address)
+        method: "eth_requestAccounts",
+      })
+
+      const address = accounts[0]
+      setWalletAddress(address)
+      console.log("Connected wallet address:", address)
     } catch (err: any) {
       console.error("Wallet connection failed:", err)
       alert("Failed to connect wallet: " + err.message)
     }
-  } 
+  }
 
-  const handleLogout = () => {
-    setRole(null)
-    setIsAuthenticated(false)
+  const handleLogout = async () => {
+    await signOut()
+    setWalletAddress(null)
+    localStorage.removeItem("connectedWallet")
     router.push("/")
   }
 
   const getNavLinks = () => {
     const baseLinks = [{ href: "/", label: "Home" }]
 
-    if (!isAuthenticated) {
+    if (!isSignedIn) {
       return [...baseLinks, { href: "/login", label: "Login" }]
     }
 
@@ -117,10 +119,10 @@ export function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-4">
-            {/* Role + Logout only for email-authenticated users */}
-            {isAuthenticated && (
+            {/* Role + Logout only for authenticated users */}
+            {isSignedIn && (
               <div className="flex items-center gap-3">
-                <span className="text-sm text-foreground/70 capitalize">{role}</span>
+                {role && <span className="text-sm text-foreground/70 capitalize">{role}</span>}
                 <button
                   onClick={handleLogout}
                   className="px-4 py-2 border border-white/20 rounded-lg font-semibold hover:bg-white/5 transition-all duration-300 flex items-center gap-2"
@@ -131,15 +133,13 @@ export function Navbar() {
             )}
 
             {/* Wallet connect button — only visible after login */}
-            {isAuthenticated && (
+            {isSignedIn && (
               <button
                 onClick={() => {
                   if (walletAddress) {
-                    // Disconnect wallet
                     setWalletAddress(null)
                     localStorage.removeItem("connectedWallet")
                   } else {
-                    // Connect wallet
                     connectWallet()
                   }
                 }}
@@ -147,12 +147,10 @@ export function Navbar() {
               >
                 {walletAddress
                   ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-                  : "Connect Wallet"
-                }
+                  : "Connect Wallet"}
               </button>
             )}
           </div>
-
 
           {/* Mobile Menu Button */}
           <button className="md:hidden" onClick={() => setIsOpen(!isOpen)}>
@@ -173,9 +171,9 @@ export function Navbar() {
               </Link>
             ))}
             <div className="pt-4 border-t border-white/10 space-y-2">
-              {isAuthenticated && (
+              {isSignedIn && (
                 <>
-                  <div className="px-4 py-2 text-sm text-foreground/70 capitalize">Role: {role}</div>
+                  {role && <div className="px-4 py-2 text-sm text-foreground/70 capitalize">Role: {role}</div>}
                   <button
                     onClick={handleLogout}
                     className="w-full px-4 py-2 border border-white/20 rounded-lg font-semibold hover:bg-white/5 transition-all duration-300 flex items-center justify-center gap-2"
@@ -184,10 +182,10 @@ export function Navbar() {
                   </button>
                 </>
               )}
-              {isAuthenticated && (
+              {isSignedIn && (
                 <button
                   onClick={() => {
-                    if(walletAddress) {
+                    if (walletAddress) {
                       setWalletAddress(null)
                       localStorage.removeItem("connectedWallet")
                     } else {
@@ -198,7 +196,7 @@ export function Navbar() {
                 >
                   {walletAddress
                     ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-                      : "Connect Wallet"}
+                    : "Connect Wallet"}
                 </button>
               )}
             </div>
