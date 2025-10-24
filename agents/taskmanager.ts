@@ -5,13 +5,21 @@ import { Client, PrivateKey } from '@hashgraph/sdk';
 import { HederaLangchainToolkit, coreConsensusPlugin } from 'hedera-agent-kit';
 import { ChatOpenAI } from '@langchain/openai';
 
-dotenv.config();
+dotenv.config({ path: '/Users/veerchheda/coding/ethonline/eth-global/hedera/.env' });
+
+// Task interface with IPFS hash
+export interface Task {
+  taskId: number;
+  ipfsHash: string;
+  raw?: any; // Original task data
+}
 
 export interface Project {
   projectId: string;
   taskCount: number;
   reward: number;
   status: "open" | "assigned" | "completed";
+  tasks: Task[]; // Array of tasks with IPFS hashes
   createdAt: Date;
 }
 
@@ -20,6 +28,10 @@ export interface ProjectMessage {
   projectId: string;
   taskCount: number;
   reward: number;
+  tasks: Array<{
+    taskId: number;
+    ipfsHash: string;
+  }>; // Include IPFS hashes in HCS message
   timestamp: string;
 }
 
@@ -30,38 +42,33 @@ export class TaskManagerAgent {
   private client: Client;
 
   constructor(topicId?: string) {
-    this.topicId = topicId || process.env.PROJECTS_TOPIC_ID || "";
+    this.topicId = topicId || process.env.PROJECT_TOPICS_ID || "";
     
-    // Initialize Hedera client
     this.client = Client.forTestnet().setOperator(
       process.env.HEDERA_TESTNET_ACCOUNT_ID!,
       PrivateKey.fromStringECDSA(process.env.HEDERA_TESTNET_PRIVATE_KEY!)
     );
   }
 
-
   async initialize(): Promise<void> {
     try {
-      // Initialize AI model
       const llm = new ChatOpenAI({ 
         model: 'gpt-4o-mini',
         temperature: 0.7
       });
 
-      // Initialize Hedera Agent Toolkit with consensus plugin
       const hederaAgentToolkit = new HederaLangchainToolkit({
         client: this.client,
         configuration: {
-          plugins: [coreConsensusPlugin] // Enables HCS operations
+          plugins: [coreConsensusPlugin]
         },
       });
-
 
       const prompt = ChatPromptTemplate.fromMessages([
         [
           'system', 
           'You are a task management assistant that can submit messages to Hedera Consensus Service (HCS) topics. ' +
-          'When asked to create or update projects, you should submit the project information to the specified topic ID. ' +
+          'When asked to create or update projects, you should submit the project information including IPFS hashes to the specified topic ID. ' +
           'Always confirm successful operations and provide transaction details when available.'
         ],
         ['placeholder', '{chat_history}'],
@@ -69,17 +76,14 @@ export class TaskManagerAgent {
         ['placeholder', '{agent_scratchpad}'],
       ]);
 
-      // Get tools from toolkit
       const tools = hederaAgentToolkit.getTools();
 
-      // Create agent
       const agent = createToolCallingAgent({
         llm,
         tools,
         prompt,
       });
 
-      // Create executor
       this.agentExecutor = new AgentExecutor({
         agent,
         tools,
@@ -93,31 +97,42 @@ export class TaskManagerAgent {
     }
   }
 
-
+  /**
+   * Create a new project with IPFS task hashes
+   */
   async createProject(
     projectId: string, 
     taskCount: number, 
-    reward: number
+    reward: number,
+    tasks: Task[] // Accept tasks with IPFS hashes
   ): Promise<Project> {
     try {
+      // Validate task count matches
+      if (tasks.length !== taskCount) {
+        throw new Error(`Task count mismatch: expected ${taskCount}, got ${tasks.length}`);
+      }
 
       const project: Project = { 
         projectId, 
         taskCount, 
         reward, 
         status: "open",
+        tasks, // Store tasks with IPFS hashes
         createdAt: new Date()
       };
       
-
       this.projects.push(project);
 
-      // Prepare message for HCS
+      // Prepare message for HCS with IPFS hashes
       const message: ProjectMessage = {
         event: "new_project",
         projectId,
         taskCount,
         reward,
+        tasks: tasks.map(t => ({
+          taskId: t.taskId,
+          ipfsHash: t.ipfsHash
+        })),
         timestamp: new Date().toISOString()
       };
 
@@ -130,6 +145,7 @@ export class TaskManagerAgent {
 
       console.log(`\n✅ Project ${projectId} created and published to HCS`);
       console.log(`📊 Tasks: ${taskCount}, Reward: ${reward} HBAR`);
+      console.log(`📦 IPFS Hashes: ${tasks.map(t => t.ipfsHash).join(', ')}`);
       console.log(`📝 Agent response:`, response.output);
 
       return project;
@@ -139,7 +155,9 @@ export class TaskManagerAgent {
     }
   }
 
-
+  /**
+   * Update project status with IPFS hash reference
+   */
   async updateProjectStatus(
     projectId: string, 
     status: "open" | "assigned" | "completed"
@@ -157,6 +175,10 @@ export class TaskManagerAgent {
       projectId,
       taskCount: project.taskCount,
       reward: project.reward,
+      tasks: project.tasks.map(t => ({
+        taskId: t.taskId,
+        ipfsHash: t.ipfsHash
+      })),
       timestamp: new Date().toISOString()
     };
 
@@ -169,8 +191,20 @@ export class TaskManagerAgent {
   }
 
   /**
-   * List projects by status
+   * Get project with all task IPFS hashes
    */
+  getProject(projectId: string): Project | undefined {
+    return this.projects.find(p => p.projectId === projectId);
+  }
+
+  /**
+   * Get all IPFS hashes for a project
+   */
+  getProjectTaskHashes(projectId: string): string[] {
+    const project = this.getProject(projectId);
+    return project ? project.tasks.map(t => t.ipfsHash) : [];
+  }
+
   listProjects(status?: "open" | "assigned" | "completed"): Project[] {
     if (status) {
       return this.projects.filter(p => p.status === status);
@@ -178,17 +212,16 @@ export class TaskManagerAgent {
     return this.projects;
   }
 
-
   getStatistics() {
     return {
       total: this.projects.length,
       open: this.projects.filter(p => p.status === "open").length,
       assigned: this.projects.filter(p => p.status === "assigned").length,
       completed: this.projects.filter(p => p.status === "completed").length,
-      totalReward: this.projects.reduce((sum, p) => sum + p.reward, 0)
+      totalReward: this.projects.reduce((sum, p) => sum + p.reward, 0),
+      totalTasks: this.projects.reduce((sum, p) => sum + p.taskCount, 0)
     };
   }
-
 
   async createProjectsTopic(): Promise<string> {
     const response = await this.agentExecutor.invoke({
@@ -198,7 +231,6 @@ export class TaskManagerAgent {
     console.log('✅ New topic created:', response.output);
     return response.output;
   }
-
 
   async cleanup(): Promise<void> {
     this.client.close();
