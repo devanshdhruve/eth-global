@@ -1,9 +1,9 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { Upload, ArrowRight, CheckCircle2 } from "lucide-react"
+import { Upload, ArrowRight, CheckCircle2, User } from "lucide-react"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 
@@ -14,28 +14,57 @@ interface Task {
   status: "pending" | "uploading" | "uploaded" | "failed"
 }
 
+interface OwnerInfo {
+  accountId: string
+  walletAddress: string
+  name: string
+  email: string
+}
+
 export default function CreateProject() {
   const [step, setStep] = useState(1)
   const [formData, setFormData] = useState({
     projectName: "",
     description: "",
     category: "",
-    budget: "",
-    annotators: "",
-    deadline: "",
-    reward: "", // Added reward field
+    reward: "",
+  })
+  const [ownerInfo, setOwnerInfo] = useState<OwnerInfo>({
+    accountId: "",
+    walletAddress: "",
+    name: "",
+    email: "",
   })
   const [tasks, setTasks] = useState<Task[]>([])
   const [uploading, setUploading] = useState(false)
   const [filesUploaded, setFilesUploaded] = useState(false)
   const [creatingProject, setCreatingProject] = useState(false)
   const [projectCreated, setProjectCreated] = useState(false)
+  const [projectResponse, setProjectResponse] = useState<any>(null)
+
+  // Simulate getting connected wallet info
+  useEffect(() => {
+    // In a real app, you'd get this from your wallet connection
+    // For now, use demo data
+    const demoOwner = {
+      accountId: "0.0.123456", // Replace with actual connected wallet
+      walletAddress: "0x1234...5678",
+      name: "Demo User",
+      email: "user@example.com",
+    };
+    setOwnerInfo(demoOwner);
+  }, []);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target
+    setOwnerInfo((prev) => ({ ...prev, [name]: value }))
   }
 
   const handleNext = () => {
@@ -46,9 +75,6 @@ export default function CreateProject() {
     if (step > 1) setStep(step - 1)
   }
 
-  // -----------------------------
-  // Step 3: File Upload Handler
-  // -----------------------------
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -60,12 +86,17 @@ export default function CreateProject() {
     try {
       const formDataToSend = new FormData()
       formDataToSend.append("file", file)
-      formDataToSend.append(
-        "projectId",
-        formData.projectName || `project-${Date.now()}`
-      )
-      // Send reward with the file upload
+      formDataToSend.append("projectId", formData.projectName || `project-${Date.now()}`)
+      formDataToSend.append("projectName", formData.projectName)
+      formDataToSend.append("description", formData.description)
+      formDataToSend.append("category", formData.category)
       formDataToSend.append("reward", formData.reward || "0")
+      
+      // Add owner information
+      formDataToSend.append("ownerAccountId", ownerInfo.accountId)
+      formDataToSend.append("ownerWallet", ownerInfo.walletAddress)
+      formDataToSend.append("ownerName", ownerInfo.name)
+      formDataToSend.append("ownerEmail", ownerInfo.email)
 
       const res = await fetch("/api/upload", {
         method: "POST",
@@ -78,6 +109,7 @@ export default function CreateProject() {
       }
 
       const data = await res.json()
+      console.log("Upload response:", data)
 
       // Map backend tasks to frontend state
       const mappedTasks: Task[] = data.tasks.map((t: any, i: number) => ({
@@ -89,8 +121,9 @@ export default function CreateProject() {
 
       setTasks(mappedTasks)
       setFilesUploaded(true)
+      setProjectResponse(data)
       
-      // If the backend already created the project, mark it as created
+      // Mark project as created since the backend already did it
       if (data.success && data.project) {
         setProjectCreated(true)
       }
@@ -99,62 +132,6 @@ export default function CreateProject() {
       alert("Upload failed: " + err.message)
     } finally {
       setUploading(false)
-    }
-  }
-
-  // -----------------------------
-  // Create Project Handler
-  // -----------------------------
-  const handleCreateProject = async () => {
-    if (!filesUploaded || tasks.length === 0) {
-      alert("Please upload files first")
-      return
-    }
-
-    setCreatingProject(true)
-
-    try {
-      // If your backend already creates the project during upload,
-      // you might not need this. Otherwise, send a separate request:
-      const res = await fetch("/api/create-project", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          projectId: formData.projectName || `project-${Date.now()}`,
-          projectName: formData.projectName,
-          description: formData.description,
-          category: formData.category,
-          budget: parseFloat(formData.budget) || 0,
-          annotators: parseInt(formData.annotators) || 0,
-          deadline: formData.deadline,
-          reward: parseFloat(formData.reward) || 0,
-          tasks: tasks.map(t => ({
-            taskId: t.id,
-            ipfsHash: t.ipfsHash,
-          })),
-        }),
-      })
-
-      if (!res.ok) {
-        const errorData = await res.json()
-        throw new Error(errorData.error || "Failed to create project")
-      }
-
-      const data = await res.json()
-      console.log("Project created:", data)
-
-      setProjectCreated(true)
-      alert("Project created successfully!")
-      
-      // Optionally redirect to project page
-      // window.location.href = `/projects/${data.project.projectId}`
-    } catch (err: any) {
-      console.error("Failed to create project", err)
-      alert("Failed to create project: " + err.message)
-    } finally {
-      setCreatingProject(false)
     }
   }
 
@@ -209,36 +186,86 @@ export default function CreateProject() {
           {step === 1 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold mb-6">Project Details</h2>
+              
+              {/* Owner Information */}
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <User size={20} className="text-blue-400" />
+                  <h3 className="font-semibold text-blue-400">Project Owner</h3>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Your Name</label>
+                    <input
+                      type="text"
+                      name="name"
+                      value={ownerInfo.name}
+                      onChange={handleOwnerChange}
+                      placeholder="John Doe"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Email (Optional)</label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={ownerInfo.email}
+                      onChange={handleOwnerChange}
+                      placeholder="john@example.com"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <label className="block text-sm font-medium mb-2">Hedera Account ID</label>
+                  <input
+                    type="text"
+                    name="accountId"
+                    value={ownerInfo.accountId}
+                    onChange={handleOwnerChange}
+                    placeholder="0.0.123456"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                  />
+                  <p className="text-xs text-foreground/40 mt-1">
+                    Connect your Hedera wallet or enter manually
+                  </p>
+                </div>
+              </div>
+
               <div>
-                <label className="block text-sm font-medium mb-2">Project Name</label>
+                <label className="block text-sm font-medium mb-2">Project Name *</label>
                 <input
                   type="text"
                   name="projectName"
                   value={formData.projectName}
                   onChange={handleInputChange}
                   placeholder="e.g., Medical Imaging Dataset"
+                  required
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Description</label>
+                <label className="block text-sm font-medium mb-2">Description *</label>
                 <textarea
                   name="description"
                   value={formData.description}
                   onChange={handleInputChange}
                   placeholder="Describe your annotation project..."
                   rows={4}
+                  required
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Category</label>
+                <label className="block text-sm font-medium mb-2">Category *</label>
                 <select
                   name="category"
                   value={formData.category}
                   onChange={handleInputChange}
+                  required
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
                 >
                   <option value="">Select a category</option>
@@ -251,60 +278,34 @@ export default function CreateProject() {
             </div>
           )}
 
-          {/* Step 2: Budget & Resources */}
+          {/* Step 2: Budget & Reward */}
           {step === 2 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold mb-6">Budget & Resources</h2>
-              <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Budget (ASI Tokens)</label>
-                  <input
-                    type="number"
-                    name="budget"
-                    value={formData.budget}
-                    onChange={handleInputChange}
-                    placeholder="e.g., 5000"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Reward per Task (HBAR)</label>
-                  <input
-                    type="number"
-                    name="reward"
-                    value={formData.reward}
-                    onChange={handleInputChange}
-                    placeholder="e.g., 100"
-                    step="0.01"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
+              <h2 className="text-2xl font-bold mb-6">Budget & Reward</h2>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Total Reward Pool (HBAR) *</label>
+                <input
+                  type="number"
+                  name="reward"
+                  value={formData.reward}
+                  onChange={handleInputChange}
+                  placeholder="e.g., 1000"
+                  step="0.01"
+                  min="0"
+                  required
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                />
+                <p className="text-xs text-foreground/40 mt-1">
+                  This will be distributed among all tasks
+                </p>
               </div>
 
-              <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Number of Annotators</label>
-                  <input
-                    type="number"
-                    name="annotators"
-                    value={formData.annotators}
-                    onChange={handleInputChange}
-                    placeholder="e.g., 50"
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Deadline</label>
-                  <input
-                    type="date"
-                    name="deadline"
-                    value={formData.deadline}
-                    onChange={handleInputChange}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
-                  />
-                </div>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+                <h4 className="font-semibold mb-2">Reward Distribution</h4>
+                <p className="text-sm text-foreground/60">
+                  Each task will receive an equal share of the total reward pool. The exact amount per task will be calculated after you upload your dataset.
+                </p>
               </div>
             </div>
           )}
@@ -362,27 +363,41 @@ export default function CreateProject() {
                 </div>
               )}
 
-              {/* Project Summary before creation */}
-              {filesUploaded && !projectCreated && (
+              {/* Project Summary */}
+              {filesUploaded && projectResponse && (
                 <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-lg p-6 mt-6">
                   <h4 className="text-lg font-semibold mb-4">Project Summary</h4>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-foreground/60">Project Name:</span>
-                      <p className="font-semibold">{formData.projectName}</p>
+                      <p className="font-semibold">{projectResponse.project.projectName}</p>
                     </div>
                     <div>
                       <span className="text-foreground/60">Category:</span>
-                      <p className="font-semibold">{formData.category}</p>
+                      <p className="font-semibold">{projectResponse.project.category}</p>
                     </div>
                     <div>
                       <span className="text-foreground/60">Total Tasks:</span>
-                      <p className="font-semibold">{tasks.length}</p>
+                      <p className="font-semibold">{projectResponse.project.taskCount}</p>
                     </div>
                     <div>
-                      <span className="text-foreground/60">Reward:</span>
-                      <p className="font-semibold">{formData.reward} HBAR</p>
+                      <span className="text-foreground/60">Reward per Task:</span>
+                      <p className="font-semibold">{projectResponse.project.rewardPerTask} HBAR</p>
                     </div>
+                    <div>
+                      <span className="text-foreground/60">Total Reward:</span>
+                      <p className="font-semibold">{projectResponse.project.reward} HBAR</p>
+                    </div>
+                    <div>
+                      <span className="text-foreground/60">Owner:</span>
+                      <p className="font-semibold">{projectResponse.project.owner.name}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <span className="text-foreground/60 text-xs">Transaction ID:</span>
+                    <p className="font-mono text-xs text-blue-400 break-all">
+                      {projectResponse.hedera.transactionId}
+                    </p>
                   </div>
                 </div>
               )}
@@ -392,7 +407,16 @@ export default function CreateProject() {
                 <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-6 mt-6 text-center">
                   <CheckCircle2 className="w-16 h-16 mx-auto mb-4 text-green-400" />
                   <h4 className="text-xl font-semibold mb-2">Project Created Successfully!</h4>
-                  <p className="text-foreground/60">Your project has been submitted to the Hedera network</p>
+                  <p className="text-foreground/60 mb-4">Your project has been submitted to the Hedera network</p>
+                  <div className="flex gap-4 justify-center">
+                    <a
+                      href={`/dashboard/${ownerInfo.accountId}`}
+                      className="px-6 py-2 bg-white/10 border border-white/20 rounded-lg hover:bg-white/20 transition-all"
+                    >
+                      View Dashboard
+                    </a>
+                    
+                  </div>
                 </div>
               )}
             </div>
@@ -413,24 +437,26 @@ export default function CreateProject() {
             {step < 3 ? (
               <button
                 onClick={handleNext}
-                className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 flex items-center gap-2 neon-glow"
+                disabled={
+                  (step === 1 && (!formData.projectName || !formData.description || !formData.category || !ownerInfo.accountId)) ||
+                  (step === 2 && !formData.reward)
+                }
+                className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 neon-glow"
               >
                 Next <ArrowRight size={18} />
               </button>
             ) : (
               <button
-                onClick={handleCreateProject}
-                disabled={!filesUploaded || creatingProject || projectCreated}
+                onClick={() => window.location.href = `/dashboard/${ownerInfo.accountId}`}
+                disabled={!projectCreated}
                 className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 neon-glow"
               >
-                {creatingProject ? (
-                  <>Creating...</>
-                ) : projectCreated ? (
-                  <>Project Created ✓</>
-                ) : (
+                {projectCreated ? (
                   <>
-                    Create Project <CheckCircle2 size={18} />
+                    Go to Dashboard <ArrowRight size={18} />
                   </>
+                ) : (
+                  <>Upload Files to Continue</>
                 )}
               </button>
             )}
