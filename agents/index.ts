@@ -1,4 +1,4 @@
-import { TaskManagerAgent } from '../taskmanager';
+import { TaskManagerAgent } from './taskmanager';
 
 async function main() {
   console.log('🚀 Starting Hedera Task Manager Agent...\n');
@@ -47,4 +47,4 @@ async function main() {
 }
 
 // Run the examples
-main().catch(console.error);
+main();
