@@ -64,12 +64,7 @@ export function Navbar() {
     if (role === "annotator") {
       return [
         ...baseLinks,
-        { href: "/projects", label: "Projects" },
-        { href: "/annotate", label: "Annotate" },
-        { href: "/reputation", label: "Reputation" },
-        { href: "/wallet", label: "Wallet" },
-        { href: "/verify", label: "Verify" },
-        { href: "/dashboard", label: "Dashboard" },
+        { href: "/projects", label: "Projects" }
       ]
     }
 
