@@ -1,12 +1,18 @@
+// /app/api/projects/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 
 const PROJECT_TOPICS_ID = process.env.PROJECT_TOPICS_ID;
+// NEW: Add your screening topic ID from .env
+const SCREENING_TOPIC_ID = process.env.SCREENING_TOPICS_ID; 
 const MIRROR_NODE_URL = "https://testnet.mirrornode.hedera.com";
 
+// Define the structure of a project message
 interface HCSProject {
   event: string;
   projectId: string;
   taskCount: number;
+  instruction: string;
   reward: number;
   tasks: Array<{
     taskId: number;
@@ -16,71 +22,113 @@ interface HCSProject {
   status?: string;
 }
 
+// Define the structure of a screening result message
+interface HCSScreeningResult {
+  type: "SCREENING_RESULT";
+  projectId: string;
+  userId: string;
+  score: number;
+  status: 'passed' | 'failed';
+  timestamp: string;
+}
+
+// Helper function to fetch messages from a topic
+async function fetchTopicMessages(topicId: string) {
+  const response = await fetch(
+    `${MIRROR_NODE_URL}/api/v1/topics/${topicId}/messages?limit=100&order=desc`
+  );
+  if (!response.ok) {
+    throw new Error(`Mirror Node API error for topic ${topicId}: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return data.messages || [];
+}
+
 export const GET = async (req: NextRequest) => {
   try {
-    if (!PROJECT_TOPICS_ID) {
+    if (!PROJECT_TOPICS_ID || !SCREENING_TOPIC_ID) {
       return NextResponse.json(
-        { error: "Missing PROJECT_TOPICS_ID configuration" },
+        { error: "Missing PROJECT_TOPICS_ID or SCREENING_TOPIC_ID configuration" },
         { status: 500 }
       );
     }
 
-    console.log(`📡 Fetching messages from Mirror Node for topic: ${PROJECT_TOPICS_ID}`);
-
-    // Fetch messages from Hedera Mirror Node
-    const response = await fetch(
-      `${MIRROR_NODE_URL}/api/v1/topics/${PROJECT_TOPICS_ID}/messages?limit=100&order=desc`
-    );
-
-    if (!response.ok) {
-      throw new Error(`Mirror Node API error: ${response.statusText}`);
-    }
-
-    const data = await response.json();
+    // --- Step 1: Fetch and process all projects ---
+    console.log(`📡 Fetching project messages from topic: ${PROJECT_TOPICS_ID}`);
+    const projectMessages = await fetchTopicMessages(PROJECT_TOPICS_ID);
     const projectMap = new Map<string, HCSProject>();
 
-    // Process messages (newest first)
-    for (const msg of data.messages.reverse()) {
+    for (const msg of projectMessages.reverse()) { // Process oldest first
       try {
-        const messageBytes = Buffer.from(msg.message, "base64");
-        const messageString = messageBytes.toString("utf-8");
+        const messageString = Buffer.from(msg.message, "base64").toString("utf-8");
         const projectData: HCSProject = JSON.parse(messageString);
 
-        console.log(`📨 Processing: ${projectData.event} - ${projectData.projectId}`);
-
-        // Track the latest state of each project
         if (projectData.event === "new_project") {
           projectData.status = "open";
           projectData.timestamp = msg.consensus_timestamp;
           projectMap.set(projectData.projectId, projectData);
-        } else if (projectData.event === "project_assigned") {
-          const existing = projectMap.get(projectData.projectId);
-          if (existing) {
-            existing.status = "assigned";
-          }
         } else if (projectData.event === "project_completed") {
           const existing = projectMap.get(projectData.projectId);
-          if (existing) {
-            existing.status = "completed";
-          }
+          if (existing) existing.status = "completed";
         }
       } catch (err) {
-        console.error("Failed to parse message:", err);
+        console.warn("Could not parse a project message:", err);
       }
     }
 
-    // Convert map to array and filter for open projects
-    const allProjects = Array.from(projectMap.values());
-    const openProjects = allProjects.filter((p) => p.status === "open");
+    const allOpenProjects = Array.from(projectMap.values()).filter((p) => p.status === "open");
+    console.log(`✅ Found ${allOpenProjects.length} open projects.`);
 
-    console.log(`✅ Found ${allProjects.length} total projects, ${openProjects.length} open`);
+    // --- Step 2: Fetch and process screening results for the current user ---
+    
+    // TODO: Replace this with your actual user authentication logic
+    // This could come from a session, a JWT token, etc.
+    const currentUserId = "user-123-placeholder"; 
+    
+    console.log(`📡 Fetching screening results from topic: ${SCREENING_TOPIC_ID}`);
+    const screeningMessages = await fetchTopicMessages(SCREENING_TOPIC_ID);
+    const passedProjectIds = new Set<string>();
 
+    for (const msg of screeningMessages) {
+        try {
+            const messageString = Buffer.from(msg.message, "base64").toString("utf-8");
+            const resultData: HCSScreeningResult = JSON.parse(messageString);
+
+            // Check if the result is for the current user and if they passed
+            if (resultData.userId === currentUserId && resultData.status === 'passed') {
+                passedProjectIds.add(resultData.projectId);
+            }
+        } catch(err) {
+            console.warn("Could not parse a screening message:", err);
+        }
+    }
+    console.log(`✅ User ${currentUserId} has passed screening for ${passedProjectIds.size} projects.`);
+
+
+    // --- Step 3: Categorize projects into "available" and "myProjects" ---
+    const availableProjects: HCSProject[] = [];
+    const myProjects: HCSProject[] = [];
+
+    for (const project of allOpenProjects) {
+        if (passedProjectIds.has(project.projectId)) {
+            // If the user has a 'passed' record for this project, it's theirs
+            myProjects.push(project);
+        } else {
+            // Otherwise, it's available for them to screen
+            availableProjects.push(project);
+        }
+    }
+
+    // --- Step 4: Return the structured response ---
     return NextResponse.json({
       success: true,
-      projects: openProjects,
-      totalProjects: allProjects.length,
+      projects: {
+        available: availableProjects,
+        myProjects: myProjects,
+      },
       timestamp: new Date().toISOString(),
     });
+
   } catch (err: any) {
     console.error("❌ Error fetching projects:", err);
     return NextResponse.json(
@@ -93,5 +141,5 @@ export const GET = async (req: NextRequest) => {
   }
 };
 
-// Enable caching for better performance
-export const revalidate = 30; // Revalidate every 30 seconds
+// Revalidate every 30 seconds
+export const revalidate = 30;
