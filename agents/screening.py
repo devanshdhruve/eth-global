@@ -56,7 +56,7 @@ def generate_questions_sync(instruction: str, client: OpenAI) -> List[str]:
     system_prompt = """
     You are an expert curriculum designer tasked with screening a user's expertise on a topic.
     The user will provide an instruction or topic. Your job is to generate 5 screening questions
-    that test the user's *deep knowledge* of the *subject matter* behind the instruction.
+    that test the user's *deep knowledge* of the *subject matter* behind the instruction. Make the questions appropriate for a 7th grader,
     Output *only* a JSON object with a single key "questions" containing a list of strings.
     """
     try:
