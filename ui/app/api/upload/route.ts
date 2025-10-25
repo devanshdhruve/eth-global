@@ -25,7 +25,6 @@ export const POST = async (req: NextRequest) => {
   try {
     console.log("\n🚀 === NEW PROJECT UPLOAD REQUEST ===");
 
-    // Validate environment variables
     if (!PINATA_JWT) {
       throw new Error("Missing PINATA_JWT environment variable");
     }
@@ -33,18 +32,16 @@ export const POST = async (req: NextRequest) => {
       throw new Error("Missing Hedera configuration in environment variables");
     }
 
-    // Parse form data
     console.log("Step 1: Parsing form data...");
     const formData = await req.formData();
     
     const file = formData.get("file") as File;
     const projectId = formData.get("projectId") as string;
     const projectName = formData.get("projectName") as string;
-    const description = formData.get("description") as string;
+    const instruction = formData.get("instruction") as string;
     const category = formData.get("category") as string;
     const rewardStr = formData.get("reward") as string;
     
-    // Owner information
     const ownerAccountId = formData.get("ownerAccountId") as string;
     const ownerWallet = formData.get("ownerWallet") as string;
     const ownerName = formData.get("ownerName") as string;
@@ -58,18 +55,8 @@ export const POST = async (req: NextRequest) => {
     console.log("  - Category:", category);
     console.log("  - Reward:", rewardStr);
 
-    // Validation
-    if (!file) {
-      return NextResponse.json({ error: "Missing file" }, { status: 400 });
-    }
-    if (!projectId) {
-      return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
-    }
-    if (!projectName) {
-      return NextResponse.json({ error: "Missing projectName" }, { status: 400 });
-    }
-    if (!rewardStr) {
-      return NextResponse.json({ error: "Missing reward" }, { status: 400 });
+    if (!file || !projectId || !projectName || !rewardStr) {
+      return NextResponse.json({ error: "Missing required form fields" }, { status: 400 });
     }
 
     const reward = parseFloat(rewardStr);
@@ -77,7 +64,6 @@ export const POST = async (req: NextRequest) => {
       return NextResponse.json({ error: "Invalid reward amount" }, { status: 400 });
     }
 
-    // Create owner object
     const owner: ProjectOwner = {
       accountId: ownerAccountId || HEDERA_ACCOUNT_ID!,
       walletAddress: ownerWallet,
@@ -88,7 +74,6 @@ export const POST = async (req: NextRequest) => {
     console.log(`👤 Project Owner: ${owner.name} (${owner.accountId})`);
     console.log(`💰 Total Reward: ${reward} HBAR`);
 
-    // Step 2: Parse the uploaded file
     console.log("\nStep 2: Parsing uploaded file...");
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileText = buffer.toString("utf-8");
@@ -97,57 +82,34 @@ export const POST = async (req: NextRequest) => {
 
     if (file.name.endsWith(".csv")) {
       console.log("  Parsing as CSV...");
-      const rows = parse(fileText, {
-        skip_empty_lines: true,
-        trim: true,
-        columns: false,
-      });
-      taskData = rows.map((row: any, index: number) => ({
-        taskId: index + 1,
-        data: Array.isArray(row) ? row : [row],
-      }));
+      taskData = parse(fileText, { skip_empty_lines: true, trim: true, columns: false })
+        .map((row: any, index: number) => ({ taskId: index + 1, data: Array.isArray(row) ? row : [row] }));
     } else if (file.name.endsWith(".json")) {
       console.log("  Parsing as JSON...");
       const json = JSON.parse(fileText);
-      if (!Array.isArray(json)) {
-        return NextResponse.json(
-          { error: "JSON must be an array of tasks" },
-          { status: 400 }
-        );
-      }
-      taskData = json.map((item: any, index: number) => ({
-        taskId: index + 1,
-        data: item,
-      }));
+      if (!Array.isArray(json)) throw new Error("JSON must be an array of tasks");
+      taskData = json.map((item: any, index: number) => ({ taskId: index + 1, data: item }));
     } else {
-      return NextResponse.json(
-        { error: "Unsupported file type. Use .csv or .json" },
-        { status: 400 }
-      );
+      throw new Error("Unsupported file type. Use .csv or .json");
     }
 
     if (taskData.length === 0) {
-      return NextResponse.json(
-        { error: "File contains no tasks" },
-        { status: 400 }
-      );
+      throw new Error("File contains no tasks");
     }
 
     console.log(`✅ Parsed ${taskData.length} tasks from file`);
 
-    // Step 3: Pin each task to IPFS via Pinata
     console.log("\nStep 3: Pinning tasks to IPFS...");
     const tasks: Task[] = [];
 
-    for (let i = 0; i < taskData.length; i++) {
-      const task = taskData[i];
+    for (const task of taskData) {
       console.log(`  📌 Pinning task ${task.taskId}/${taskData.length}...`);
-
       try {
         const ipfsHash = await pinTaskToPinata({
           taskId: task.taskId,
           projectId,
           payload: task.data,
+          instruction: instruction, // Pass instruction to be pinned
         });
 
         tasks.push({
@@ -166,19 +128,13 @@ export const POST = async (req: NextRequest) => {
 
     console.log(`\n🎯 All ${tasks.length} tasks pinned to IPFS`);
 
-    // Step 4: Submit to Hedera Consensus Service
     console.log("\nStep 4: Submitting to Hedera Consensus Service...");
-    
-    taskManager = new TaskManagerServer(
-      PROJECT_TOPICS_ID,
-      HEDERA_ACCOUNT_ID,
-      HEDERA_PRIVATE_KEY
-    );
+    taskManager = new TaskManagerServer(PROJECT_TOPICS_ID, HEDERA_ACCOUNT_ID, HEDERA_PRIVATE_KEY);
 
     const project: Project = {
       projectId,
       projectName,
-      description,
+      instruction,
       owner,
       taskCount: tasks.length,
       reward,
@@ -189,17 +145,14 @@ export const POST = async (req: NextRequest) => {
     };
 
     const transactionId = await taskManager.submitProjectToHCS(project);
-
-    // Get task statistics
     const stats = taskManager.getTaskStatusStats(tasks);
 
-    // Step 5: Return success response
     const response = {
       success: true,
       project: {
         projectId: project.projectId,
         projectName: project.projectName,
-        description: project.description,
+        instruction: project.instruction,
         owner: {
           accountId: project.owner.accountId,
           name: project.owner.name,
@@ -230,43 +183,28 @@ export const POST = async (req: NextRequest) => {
     };
 
     console.log(`\n✅ === PROJECT CREATED SUCCESSFULLY ===`);
-    console.log(`Project: ${projectId}`);
-    console.log(`Owner: ${owner.name} (${owner.accountId})`);
-    console.log(`Tasks: ${tasks.length}`);
-    console.log(`Reward: ${reward} HBAR`);
     console.log(`Transaction: ${transactionId}\n`);
 
     return NextResponse.json(response, { status: 201 });
   } catch (err: any) {
     console.error("\n❌ === ERROR CREATING PROJECT ===");
     console.error("Error:", err.message);
-    console.error("Stack:", err.stack);
     
     return NextResponse.json(
-      {
-        error: err.message || "Internal server error",
-        details: process.env.NODE_ENV === "development" ? err.stack : undefined,
-      },
+      { error: err.message || "Internal server error" },
       { status: 500 }
     );
   } finally {
-    if (taskManager) {
-      try {
-        taskManager.cleanup();
-      } catch (cleanupError) {
-        console.error("Warning: Failed to cleanup:", cleanupError);
-      }
-    }
+    taskManager?.cleanup();
   }
 };
 
-/**
- * Pin a single task to Pinata IPFS
- */
+
 const pinTaskToPinata = async (task: {
   taskId: number;
   projectId: string;
   payload: any;
+  instruction: string; 
 }): Promise<string> => {
   const res = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
     method: "POST",
@@ -275,9 +213,7 @@ const pinTaskToPinata = async (task: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      pinataOptions: {
-        cidVersion: 1,
-      },
+      pinataOptions: { cidVersion: 1 },
       pinataMetadata: {
         name: `task-${task.taskId}`,
         keyvalues: {
@@ -288,6 +224,7 @@ const pinTaskToPinata = async (task: {
       pinataContent: {
         projectId: task.projectId,
         taskId: task.taskId,
+        instruction: task.instruction, 
         data: task.payload,
         timestamp: new Date().toISOString(),
       },

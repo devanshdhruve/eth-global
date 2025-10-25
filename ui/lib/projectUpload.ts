@@ -23,7 +23,7 @@ export interface ProjectOwner {
 export interface Project {
   projectId: string;
   projectName?: string; // Human-readable project name
-  description?: string; // Project description
+  instruction?: string; // Project description
   owner: ProjectOwner; // ✅ Added owner information
   taskCount: number;
   reward: number;
@@ -38,7 +38,7 @@ export interface ProjectMessage {
   event: "new_project" | "task_updated" | "project_status_changed";
   projectId: string;
   projectName?: string;
-  description?: string;
+  instruction?: string;
   owner: ProjectOwner; // ✅ Include owner in HCS messages
   taskCount: number;
   reward: number;
@@ -51,7 +51,7 @@ export interface ProjectMessage {
   projectStatus: ProjectStatus;
   timestamp: string;
   category?: string;
-  // Optional: Include specific task update info
+
   updatedTask?: {
     taskId: number;
     oldStatus: TaskStatus;
@@ -71,9 +71,7 @@ export interface TaskStatusStats {
   completionRate: number;
 }
 
-/**
- * Lightweight server-side task manager with task-level status tracking
- */
+
 export class TaskManagerServer {
   private client: Client;
   private topicId: string;
@@ -99,7 +97,7 @@ export class TaskManagerServer {
       return "completed";
     }
 
-    // If any task is assigned or in progress, project is in progress
+
     if (stats.assigned > 0 || stats.in_progress > 0 || stats.submitted > 0) {
       return "in_progress";
     }
@@ -140,7 +138,7 @@ export class TaskManagerServer {
           stats.in_progress++;
           break;
         case "submitted":
-          stats.submitted++;
+          stats.submitted++;``
           break;
         case "verified":
           stats.verified++;
@@ -176,7 +174,7 @@ export class TaskManagerServer {
         event: "new_project",
         projectId: project.projectId,
         projectName: project.projectName,
-        description: project.description,
+        instruction: project.instruction,
         owner: project.owner, // ✅ Include owner info
         taskCount: project.taskCount,
         reward: project.reward,
@@ -249,7 +247,7 @@ export class TaskManagerServer {
         event: "task_updated",
         projectId: project.projectId,
         projectName: project.projectName,
-        description: project.description,
+        instruction: project.instruction,
         owner: project.owner, // ✅ Always include owner
         taskCount: project.taskCount,
         reward: project.reward,

@@ -25,7 +25,7 @@ export default function CreateProject() {
   const [step, setStep] = useState(1)
   const [formData, setFormData] = useState({
     projectName: "",
-    description: "",
+    instruction: "", // Renamed from description
     category: "",
     reward: "",
   })
@@ -88,7 +88,7 @@ export default function CreateProject() {
       formDataToSend.append("file", file)
       formDataToSend.append("projectId", formData.projectName || `project-${Date.now()}`)
       formDataToSend.append("projectName", formData.projectName)
-      formDataToSend.append("description", formData.description)
+      formDataToSend.append("instruction", formData.instruction) // Renamed from description
       formDataToSend.append("category", formData.category)
       formDataToSend.append("reward", formData.reward || "0")
       
@@ -247,12 +247,12 @@ export default function CreateProject() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Description *</label>
+                <label className="block text-sm font-medium mb-2">Instruction *</label> 
                 <textarea
-                  name="description"
-                  value={formData.description}
+                  name="instruction" // Renamed from description
+                  value={formData.instruction} // Renamed from description
                   onChange={handleInputChange}
-                  placeholder="Describe your annotation project..."
+                  placeholder="Provide clear instructions for the annotators..." // Updated placeholder
                   rows={4}
                   required
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
@@ -438,7 +438,7 @@ export default function CreateProject() {
               <button
                 onClick={handleNext}
                 disabled={
-                  (step === 1 && (!formData.projectName || !formData.description || !formData.category || !ownerInfo.accountId)) ||
+                  (step === 1 && (!formData.projectName || !formData.instruction || !formData.category || !ownerInfo.accountId)) || // Renamed
                   (step === 2 && !formData.reward)
                 }
                 className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 neon-glow"
