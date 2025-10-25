@@ -21,6 +21,7 @@ export interface Project {
   status: "open" | "assigned" | "completed";
   tasks: Task[]; // Array of tasks with IPFS hashes
   createdAt: Date;
+  instruction: string;
 }
 
 export interface ProjectMessage {
@@ -32,6 +33,7 @@ export interface ProjectMessage {
     taskId: number;
     ipfsHash: string;
   }>; // Include IPFS hashes in HCS message
+  instruction?: string;
   timestamp: string;
 }
 
@@ -104,7 +106,8 @@ export class TaskManagerAgent {
     projectId: string, 
     taskCount: number, 
     reward: number,
-    tasks: Task[] // Accept tasks with IPFS hashes
+    tasks: Task[], // Accept tasks with IPFS hashes
+    instruction: string
   ): Promise<Project> {
     try {
       // Validate task count matches
@@ -118,7 +121,8 @@ export class TaskManagerAgent {
         reward, 
         status: "open",
         tasks, // Store tasks with IPFS hashes
-        createdAt: new Date()
+        createdAt: new Date(),
+        instruction
       };
       
       this.projects.push(project);
@@ -179,6 +183,7 @@ export class TaskManagerAgent {
         taskId: t.taskId,
         ipfsHash: t.ipfsHash
       })),
+      instruction: project.instruction,
       timestamp: new Date().toISOString()
     };
 
