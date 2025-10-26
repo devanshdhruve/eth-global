@@ -1,22 +1,15 @@
-// api/delegation/route.ts - Using Jose instead of jsonwebtoken
-
 import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
-import { SignJWT, jwtVerify } from "jose"; // ✅ Use jose instead of jsonwebtoken
-import { 
-  Client, 
-  TopicMessageSubmitTransaction,
-  TopicId 
-} from "@hashgraph/sdk";
+import { SignJWT, jwtVerify } from "jose";
+import { Client, TopicMessageSubmitTransaction, TopicId, PrivateKey } from "@hashgraph/sdk";
 import { LitNodeClient } from "@lit-protocol/lit-node-client";
-import { LitAbility, LitActionResource } from "@lit-protocol/auth-helpers";
+import { LitActionResource } from "@lit-protocol/auth-helpers";
 import {
   DelegationRequest,
   DelegationResponse,
   PaymentDelegation,
 } from "@/types/payment";
 
-// Environment variables validation
 const JWT_SECRET = process.env.JWT_SECRET;
 const PROJECT_TOPICS_ID = process.env.PROJECT_TOPICS_ID;
 const HEDERA_TESTNET_ACCOUNT_ID = process.env.HEDERA_TESTNET_ACCOUNT_ID;
@@ -26,26 +19,22 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET environment variable is required");
 }
 
-// Convert JWT_SECRET to Uint8Array for jose
 const secret = new TextEncoder().encode(JWT_SECRET);
 
-// In-memory cache for revoked tokens (synced from HCS)
 let revokedTokensCache = new Set<string>();
 let lastSyncTimestamp: number = 0;
-const CACHE_TTL = 60000; // 1 minute
+const CACHE_TTL = 60000;
 
-// Hedera client setup
 function getHederaClient(): Client {
   if (!HEDERA_TESTNET_ACCOUNT_ID || !HEDERA_TESTNET_PRIVATE_KEY) {
     throw new Error("Hedera credentials not configured");
   }
-  
+
   const client = Client.forTestnet();
-  client.setOperator(HEDERA_TESTNET_ACCOUNT_ID, HEDERA_TESTNET_PRIVATE_KEY);
+  client.setOperator(HEDERA_TESTNET_ACCOUNT_ID, PrivateKey.fromStringECDSA(HEDERA_TESTNET_PRIVATE_KEY));
   return client;
 }
 
-// ✅ Create Delegation (POST)
 export const POST = async (req: NextRequest) => {
   try {
     const delegationRequest: DelegationRequest = await req.json();
@@ -61,7 +50,7 @@ export const POST = async (req: NextRequest) => {
 
     console.log("🔐 Creating delegation for:", clientWallet);
 
-    // ✅ 1. Verify signature authenticity
+    // Verify signature
     const recovered = ethers.verifyMessage(signedMessage, clientSignature);
     if (recovered.toLowerCase() !== clientWallet.toLowerCase()) {
       return NextResponse.json(
@@ -70,16 +59,16 @@ export const POST = async (req: NextRequest) => {
       );
     }
 
-    // ✅ 2. Validate signed message contains timestamp (prevent replay attacks)
+    // Verify message timestamp
     const messageData = parseSignedMessage(signedMessage);
-    if (!messageData || Date.now() - messageData.timestamp > 300000) { // 5 min window
+    if (!messageData || Date.now() - messageData.timestamp > 300000) {
       return NextResponse.json(
         { success: false, error: "Invalid or expired signature" },
         { status: 401 }
       );
     }
 
-    // ✅ 3. Create JWT delegation token using jose
+    // Create JWT token
     const now = Math.floor(Date.now() / 1000);
     const expiresIn = parseTimeLimit(rules.timeLimit || "30d") / 1000;
     const exp = now + expiresIn;
@@ -94,10 +83,12 @@ export const POST = async (req: NextRequest) => {
       .setExpirationTime(exp)
       .sign(secret);
 
-    // ✅ 4. Create Lit delegation capability (DeCap)
-    const litDelegation = await createLitDelegationCapability(clientWallet, rules);
+    // Create Lit Protocol delegation capability
+    const litDelegation = await createLitDelegationCapability(
+      clientWallet,
+      rules
+    );
 
-    // ✅ 5. Return combined delegation
     const delegation: PaymentDelegation = {
       token,
       litDelegation,
@@ -108,7 +99,11 @@ export const POST = async (req: NextRequest) => {
       isActive: true,
     };
 
-    console.log("✅ Delegation issued:", delegation.token.substring(0, 20) + "...");
+    console.log("✅ Delegation issued:", delegation.token);
+    console.log("   - Wallet:", clientWallet);
+    console.log("   - Max per task:", rules.maxPaymentPerTask, "HBAR");
+    console.log("   - Max total:", rules.maxTotalSpending, "HBAR");
+    console.log("   - Expires:", delegation.expiresAt);
 
     const response: DelegationResponse = {
       success: true,
@@ -125,51 +120,51 @@ export const POST = async (req: NextRequest) => {
   }
 };
 
-// ✅ Validate Delegation (GET)
 export const GET = async (req: NextRequest) => {
   const { searchParams } = new URL(req.url);
   const token = searchParams.get("token");
 
   if (!token) {
     return NextResponse.json(
-      { valid: false, error: "Missing token" }, 
+      { valid: false, error: "Missing token" },
       { status: 400 }
     );
   }
 
   try {
-    // Sync revocation list from HCS if cache is stale
+    // Sync revocation cache from HCS
     await syncRevocationCache();
 
     // Check if token is revoked
     const tokenHash = hashToken(token);
     if (revokedTokensCache.has(tokenHash)) {
       return NextResponse.json(
-        { valid: false, error: "Token revoked" }, 
+        { valid: false, error: "Token revoked" },
         { status: 403 }
       );
     }
 
-    // Verify JWT using jose
+    // Verify JWT token
     const { payload } = await jwtVerify(token, secret);
-    
-    return NextResponse.json({ 
-      valid: true, 
+
+    return NextResponse.json({
+      valid: true,
       decoded: {
         wallet: payload.wallet,
         rules: payload.rules,
-        expiresAt: payload.exp ? new Date((payload.exp as number) * 1000).toISOString() : null
-      }
+        expiresAt: payload.exp
+          ? new Date((payload.exp as number) * 1000).toISOString()
+          : null,
+      },
     });
   } catch (error: any) {
     return NextResponse.json(
-      { valid: false, error: "Invalid or expired token" }, 
+      { valid: false, error: "Invalid or expired token" },
       { status: 401 }
     );
   }
 };
 
-// ✅ Revoke Delegation (PUT)
 export const PUT = async (req: NextRequest) => {
   try {
     const body = await req.json();
@@ -177,12 +172,12 @@ export const PUT = async (req: NextRequest) => {
 
     if (!token || !wallet || !signature) {
       return NextResponse.json(
-        { success: false, error: "Missing required fields" }, 
+        { success: false, error: "Missing required fields" },
         { status: 400 }
       );
     }
 
-    // Verify the revocation signature
+    // Verify revocation signature
     const message = `Revoke delegation: ${token}`;
     const recovered = ethers.verifyMessage(message, signature);
     if (recovered.toLowerCase() !== wallet.toLowerCase()) {
@@ -196,25 +191,24 @@ export const PUT = async (req: NextRequest) => {
     const tokenHash = hashToken(token);
     await submitRevocationToHCS(tokenHash, wallet);
 
-    // Update local cache
+    // Add to in-memory cache
     revokedTokensCache.add(tokenHash);
 
     console.log("🚫 Token revoked:", tokenHash);
 
-    return NextResponse.json({ 
-      success: true, 
-      message: "Delegation revoked and recorded on HCS" 
+    return NextResponse.json({
+      success: true,
+      message: "Delegation revoked and recorded on HCS",
     });
   } catch (error: any) {
     console.error("❌ Revocation failed:", error);
     return NextResponse.json(
-      { success: false, error: error.message }, 
+      { success: false, error: error.message },
       { status: 500 }
     );
   }
 };
 
-// 🔧 Submit revocation to Hedera Consensus Service
 async function submitRevocationToHCS(tokenHash: string, wallet: string) {
   if (!PROJECT_TOPICS_ID) {
     console.warn("⚠️ HCS not configured, revocation only in memory");
@@ -222,12 +216,12 @@ async function submitRevocationToHCS(tokenHash: string, wallet: string) {
   }
 
   const client = getHederaClient();
-  
+
   const revocationRecord = {
     token: tokenHash,
     revokedBy: wallet,
     revokedAt: new Date().toISOString(),
-    type: "delegation-revocation"
+    type: "delegation-revocation",
   };
 
   const transaction = new TopicMessageSubmitTransaction()
@@ -238,14 +232,13 @@ async function submitRevocationToHCS(tokenHash: string, wallet: string) {
   const receipt = await response.getReceipt(client);
 
   console.log("⛓️ Revocation recorded on HCS:", receipt.status.toString());
-  
+
   client.close();
 }
 
-// 🔄 Sync revocation cache from HCS mirror node
 async function syncRevocationCache() {
   const now = Date.now();
-  
+
   if (now - lastSyncTimestamp < CACHE_TTL) {
     return;
   }
@@ -258,18 +251,18 @@ async function syncRevocationCache() {
     const response = await fetch(
       `https://testnet.mirrornode.hedera.com/api/v1/topics/${PROJECT_TOPICS_ID}/messages?limit=100`
     );
-    
+
     const data = await response.json();
-    
+
     if (data.messages) {
       const newCache = new Set<string>();
-      
+
       for (const msg of data.messages) {
         try {
           const messageData = JSON.parse(
-            Buffer.from(msg.message, 'base64').toString('utf-8')
+            Buffer.from(msg.message, "base64").toString("utf-8")
           );
-          
+
           if (messageData.type === "delegation-revocation") {
             newCache.add(messageData.token);
           }
@@ -277,7 +270,7 @@ async function syncRevocationCache() {
           console.error("Failed to parse HCS message:", e);
         }
       }
-      
+
       revokedTokensCache = newCache;
       lastSyncTimestamp = now;
       console.log(`🔄 Synced ${newCache.size} revocations from HCS`);
@@ -287,56 +280,52 @@ async function syncRevocationCache() {
   }
 }
 
-// 🔧 Create Lit Delegation Capability
 async function createLitDelegationCapability(clientWallet: string, rules: any) {
+  let litClient;
   try {
-    const litClient = new LitNodeClient({ 
+    litClient = new LitNodeClient({
       litNetwork: "datil-test",
-      alertWhenUnauthorized: false 
+      alertWhenUnauthorized: false,
     });
     await litClient.connect();
     console.log("⚡ Connected to Lit Protocol");
 
     const resource = new LitActionResource("*");
-    const ability = LitAbility.AccessControlConditionDecryption;
+    const ability = "lit-action-execution";
 
     const litCapability = {
       type: "lit-capability",
       resource: resource.toString(),
-      ability: ability.toString(),
+      ability: ability,
       issuedBy: clientWallet,
       issuedAt: new Date().toISOString(),
       rules,
     };
 
-    await litClient.disconnect();
+    console.log("✅ Lit capability created successfully");
     return litCapability;
   } catch (error: any) {
-    console.error("⚠️ Lit capability creation failed:", error);
-    return {
-      type: "mock-lit-capability",
-      issuedBy: clientWallet,
-      issuedAt: new Date().toISOString(),
-      rules,
-    };
+    console.error("❌ Lit capability creation failed:", error);
+    throw new Error("Failed to create Lit Protocol capability.");
+  } finally {
+    if (litClient && litClient.ready) {
+      await litClient.disconnect();
+    }
   }
 }
 
-// 🔐 Hash token for privacy (store hash, not raw token)
 function hashToken(token: string): string {
   return ethers.keccak256(ethers.toUtf8Bytes(token));
 }
 
-// 🔐 Generate cryptographic nonce
 function generateNonce(): string {
   return ethers.hexlify(ethers.randomBytes(32));
 }
 
-// 📝 Parse signed message (expecting JSON with timestamp)
 function parseSignedMessage(message: string): { timestamp: number } | null {
   try {
     const data = JSON.parse(message);
-    if (data.timestamp && typeof data.timestamp === 'number') {
+    if (data.timestamp && typeof data.timestamp === "number") {
       return data;
     }
   } catch (e) {
@@ -345,7 +334,6 @@ function parseSignedMessage(message: string): { timestamp: number } | null {
   return null;
 }
 
-// ⏱ Parse time limits like "30d", "12h", etc.
 function parseTimeLimit(limit: string): number {
   const match = limit.match(/(\d+)([dhms])/);
   if (!match) throw new Error(`Invalid time format: ${limit}`);
@@ -354,10 +342,15 @@ function parseTimeLimit(limit: string): number {
   const unit = match[2];
 
   switch (unit) {
-    case "d": return value * 24 * 60 * 60 * 1000;
-    case "h": return value * 60 * 60 * 1000;
-    case "m": return value * 60 * 1000;
-    case "s": return value * 1000;
-    default: throw new Error(`Invalid time unit: ${unit}`);
+    case "d":
+      return value * 24 * 60 * 60 * 1000;
+    case "h":
+      return value * 60 * 60 * 1000;
+    case "m":
+      return value * 60 * 1000;
+    case "s":
+      return value * 1000;
+    default:
+      throw new Error(`Invalid time unit: ${unit}`);
   }
 }

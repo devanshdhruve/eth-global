@@ -1,5 +1,8 @@
+// app/api/upload/route.ts - WITH DELEGATION SUPPORT
+
 import { NextRequest, NextResponse } from "next/server";
 import { parse } from "csv-parse/sync";
+import { Client, PrivateKey } from "@hashgraph/sdk";
 import { 
   TaskManagerServer, 
   Task, 
@@ -13,10 +16,35 @@ const HEDERA_ACCOUNT_ID = process.env.HEDERA_TESTNET_ACCOUNT_ID;
 const HEDERA_PRIVATE_KEY = process.env.HEDERA_TESTNET_PRIVATE_KEY;
 const PROJECT_TOPICS_ID = process.env.PROJECT_TOPICS_ID;
 
+// Validate and parse private key at startup
+function initializeHederaKey(): PrivateKey | null {
+  if (!HEDERA_PRIVATE_KEY) return null;
+  
+  const cleanKey = HEDERA_PRIVATE_KEY.trim().replace(/\s+/g, '');
+  
+  try {
+    return PrivateKey.fromStringED25519(cleanKey);
+  } catch {
+    try {
+      return PrivateKey.fromStringECDSA(cleanKey);
+    } catch {
+      try {
+        return PrivateKey.fromStringDer(cleanKey);
+      } catch (e) {
+        console.error('❌ Failed to parse private key in any format');
+        return null;
+      }
+    }
+  }
+}
+
+const HEDERA_KEY = initializeHederaKey();
+
 console.log("🔍 Environment check:");
 console.log("PINATA_JWT:", PINATA_JWT ? "✅ Set" : "❌ Missing");
 console.log("HEDERA_ACCOUNT_ID:", HEDERA_ACCOUNT_ID ? "✅ Set" : "❌ Missing");
 console.log("HEDERA_PRIVATE_KEY:", HEDERA_PRIVATE_KEY ? "✅ Set" : "❌ Missing");
+console.log("HEDERA_KEY_PARSED:", HEDERA_KEY ? "✅ Valid" : "❌ Failed to parse");
 console.log("PROJECT_TOPICS_ID:", PROJECT_TOPICS_ID ? "✅ Set" : "❌ Missing");
 
 export const POST = async (req: NextRequest) => {
@@ -25,11 +53,15 @@ export const POST = async (req: NextRequest) => {
   try {
     console.log("\n🚀 === NEW PROJECT UPLOAD REQUEST ===");
 
+    // Validate environment
     if (!PINATA_JWT) {
       throw new Error("Missing PINATA_JWT environment variable");
     }
     if (!HEDERA_ACCOUNT_ID || !HEDERA_PRIVATE_KEY || !PROJECT_TOPICS_ID) {
       throw new Error("Missing Hedera configuration in environment variables");
+    }
+    if (!HEDERA_KEY) {
+      throw new Error("Invalid HEDERA_PRIVATE_KEY format. Please check your .env file");
     }
 
     console.log("Step 1: Parsing form data...");
@@ -46,6 +78,9 @@ export const POST = async (req: NextRequest) => {
     const ownerWallet = formData.get("ownerWallet") as string;
     const ownerName = formData.get("ownerName") as string;
     const ownerEmail = formData.get("ownerEmail") as string;
+    
+    // 🆕 NEW: Get delegation token from form data
+    const delegationToken = formData.get("delegationToken") as string | null;
 
     console.log("📋 Form data received:");
     console.log("  - File:", file?.name);
@@ -54,6 +89,7 @@ export const POST = async (req: NextRequest) => {
     console.log("  - Owner Account:", ownerAccountId);
     console.log("  - Category:", category);
     console.log("  - Reward:", rewardStr);
+    console.log("  - Delegation Token:", delegationToken ? "✅ Provided" : "❌ None");
 
     if (!file || !projectId || !projectName || !rewardStr) {
       return NextResponse.json({ error: "Missing required form fields" }, { status: 400 });
@@ -73,7 +109,9 @@ export const POST = async (req: NextRequest) => {
 
     console.log(`👤 Project Owner: ${owner.name} (${owner.accountId})`);
     console.log(`💰 Total Reward: ${reward} HBAR`);
+    console.log(`🔐 Delegation: ${delegationToken ? 'Enabled' : 'Disabled'}`);
 
+    // Parse file
     console.log("\nStep 2: Parsing uploaded file...");
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileText = buffer.toString("utf-8");
@@ -99,6 +137,7 @@ export const POST = async (req: NextRequest) => {
 
     console.log(`✅ Parsed ${taskData.length} tasks from file`);
 
+    // Pin to IPFS
     console.log("\nStep 3: Pinning tasks to IPFS...");
     const tasks: Task[] = [];
 
@@ -109,7 +148,7 @@ export const POST = async (req: NextRequest) => {
           taskId: task.taskId,
           projectId,
           payload: task.data,
-          instruction: instruction, // Pass instruction to be pinned
+          instruction: instruction,
         });
 
         tasks.push({
@@ -128,9 +167,17 @@ export const POST = async (req: NextRequest) => {
 
     console.log(`\n🎯 All ${tasks.length} tasks pinned to IPFS`);
 
+    // Submit to Hedera
     console.log("\nStep 4: Submitting to Hedera Consensus Service...");
-    taskManager = new TaskManagerServer(PROJECT_TOPICS_ID, HEDERA_ACCOUNT_ID, HEDERA_PRIVATE_KEY);
+    
+    taskManager = new TaskManagerServer(
+      PROJECT_TOPICS_ID, 
+      HEDERA_ACCOUNT_ID, 
+      HEDERA_PRIVATE_KEY,
+      HEDERA_KEY
+    );
 
+    // 🆕 NEW: Include delegation token in project
     const project: Project = {
       projectId,
       projectName,
@@ -142,6 +189,7 @@ export const POST = async (req: NextRequest) => {
       tasks,
       createdAt: new Date(),
       category,
+      delegationToken: delegationToken || undefined, // 🆕 ADD DELEGATION TOKEN
     };
 
     const transactionId = await taskManager.submitProjectToHCS(project);
@@ -164,6 +212,8 @@ export const POST = async (req: NextRequest) => {
         status: project.status,
         category: project.category,
         createdAt: project.createdAt,
+        delegationToken: project.delegationToken, // 🆕 INCLUDE IN RESPONSE
+        hasDelegation: !!project.delegationToken, // 🆕 FLAG
         statistics: {
           pending: stats.pending,
           completionRate: stats.completionRate,
@@ -179,26 +229,34 @@ export const POST = async (req: NextRequest) => {
         topicId: PROJECT_TOPICS_ID,
         transactionId,
         message: `Project ${projectId} created with ${tasks.length} tasks by ${owner.name}`,
+        delegation: delegationToken ? 'Enabled' : 'Disabled',
       },
     };
 
     console.log(`\n✅ === PROJECT CREATED SUCCESSFULLY ===`);
-    console.log(`Transaction: ${transactionId}\n`);
+    console.log(`Transaction: ${transactionId}`);
+    console.log(`Delegation: ${delegationToken ? 'YES' : 'NO'}\n`);
 
     return NextResponse.json(response, { status: 201 });
   } catch (err: any) {
     console.error("\n❌ === ERROR CREATING PROJECT ===");
     console.error("Error:", err.message);
     
+    let errorMessage = err.message || "Internal server error";
+    
+    if (err.message?.includes('INVALID_SIGNATURE')) {
+      errorMessage = "Invalid Hedera credentials. The private key doesn't match the account ID. " +
+                    "Please verify your HEDERA_TESTNET_ACCOUNT_ID and HEDERA_TESTNET_PRIVATE_KEY.";
+    }
+    
     return NextResponse.json(
-      { error: err.message || "Internal server error" },
+      { error: errorMessage },
       { status: 500 }
     );
   } finally {
     taskManager?.cleanup();
   }
 };
-
 
 const pinTaskToPinata = async (task: {
   taskId: number;
