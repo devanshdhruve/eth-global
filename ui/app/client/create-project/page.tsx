@@ -3,9 +3,11 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { Upload, ArrowRight, CheckCircle2, User } from "lucide-react"
+import { Upload, ArrowRight, CheckCircle2, User, Shield } from "lucide-react"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
+import { createClientDelegation, ClientDelegationConfig } from "@/lib/delegation"
+import { PaymentDelegation } from "@/types/payment"
 
 interface Task {
   id: number
@@ -28,6 +30,10 @@ export default function CreateProject() {
     instruction: "", // Renamed from description
     category: "",
     reward: "",
+    // NEW: Payment delegation fields
+    maxPaymentPerTask: "",
+    delegationDuration: "30",
+    qualityThreshold: "0.7",
   })
   const [ownerInfo, setOwnerInfo] = useState<OwnerInfo>({
     accountId: "",
@@ -41,6 +47,12 @@ export default function CreateProject() {
   const [creatingProject, setCreatingProject] = useState(false)
   const [projectCreated, setProjectCreated] = useState(false)
   const [projectResponse, setProjectResponse] = useState<any>(null)
+  
+  // NEW: Delegation state
+  const [delegationCreated, setDelegationCreated] = useState(false)
+  const [creatingDelegation, setCreatingDelegation] = useState(false)
+  const [delegationToken, setDelegationToken] = useState<string | null>(null)
+  const [delegation, setDelegation] = useState<PaymentDelegation | null>(null)
 
   // Simulate getting connected wallet info
   useEffect(() => {
@@ -65,6 +77,51 @@ export default function CreateProject() {
   const handleOwnerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
     setOwnerInfo((prev) => ({ ...prev, [name]: value }))
+  }
+
+  // NEW: Delegation creation function
+  const createPaymentDelegation = async () => {
+    if (!window.ethereum) {
+      alert("Please connect your MetaMask wallet first")
+      return
+    }
+
+    if (!formData.reward || !formData.projectName) {
+      alert("Please fill in project name and reward amount first")
+      return
+    }
+
+    setCreatingDelegation(true)
+    
+    try {
+      console.log("🔐 Creating payment delegation...")
+      
+      const delegationConfig: ClientDelegationConfig = {
+        maxPaymentPerTask: parseFloat(formData.maxPaymentPerTask) || parseFloat(formData.reward) / 10, // Default to 1/10 of total reward
+        maxTotalSpending: parseFloat(formData.reward),
+        timeLimit: `${formData.delegationDuration}d`,
+        qualityThreshold: parseFloat(formData.qualityThreshold),
+        allowedPaymentTypes: ["task-completion", "quality-bonus"],
+        projectId: formData.projectName
+      }
+
+      console.log("📋 Delegation config:", delegationConfig)
+
+      const createdDelegation = await createClientDelegation(delegationConfig)
+      
+      setDelegation(createdDelegation)
+      setDelegationToken(createdDelegation.token)
+      setDelegationCreated(true)
+      
+      console.log("✅ Delegation created successfully!")
+      console.log("🔑 Token:", createdDelegation.token)
+      
+    } catch (error: any) {
+      console.error("❌ Delegation creation failed:", error)
+      alert("Failed to create payment authorization: " + error.message)
+    } finally {
+      setCreatingDelegation(false)
+    }
   }
 
   const handleNext = () => {
@@ -278,11 +335,12 @@ export default function CreateProject() {
             </div>
           )}
 
-          {/* Step 2: Budget & Reward */}
+          {/* Step 2: Budget & Payment Setup */}
           {step === 2 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold mb-6">Budget & Reward</h2>
+              <h2 className="text-2xl font-bold mb-6">Budget & Payment Setup</h2>
               
+              {/* Existing Budget Section */}
               <div>
                 <label className="block text-sm font-medium mb-2">Total Reward Pool (HBAR) *</label>
                 <input
@@ -301,6 +359,104 @@ export default function CreateProject() {
                 </p>
               </div>
 
+              {/* NEW: Payment Delegation Section */}
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Shield className="w-5 h-5 text-blue-400" />
+                  <h3 className="text-lg font-semibold text-blue-400">AI Payment Authorization</h3>
+                </div>
+                
+                <p className="text-sm text-foreground/60 mb-4">
+                  Allow AI agents to automatically pay annotators when tasks are completed. 
+                  You maintain full control and can modify or revoke access anytime.
+                </p>
+
+                {/* Payment Rules */}
+                <div className="grid md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Max Payment per Task (HBAR)</label>
+                    <input
+                      type="number"
+                      name="maxPaymentPerTask"
+                      value={formData.maxPaymentPerTask || ""}
+                      onChange={handleInputChange}
+                      placeholder={formData.reward ? (parseFloat(formData.reward) / 10).toString() : "50"}
+                      step="0.01"
+                      min="0"
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                    />
+                    <p className="text-xs text-foreground/40 mt-1">
+                      {formData.reward ? `Suggested: ${(parseFloat(formData.reward) / 10).toFixed(2)} HBAR` : "Maximum per task"}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Delegation Duration (days)</label>
+                    <select
+                      name="delegationDuration"
+                      value={formData.delegationDuration || "30"}
+                      onChange={handleInputChange}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                    >
+                      <option value="7">7 days</option>
+                      <option value="30">30 days</option>
+                      <option value="90">90 days</option>
+                      <option value="365">1 year</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Quality Requirements */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">Quality Threshold</label>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      name="qualityThreshold"
+                      value={formData.qualityThreshold || "0.7"}
+                      onChange={handleInputChange}
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      className="flex-1"
+                    />
+                    <span className="text-sm font-mono bg-white/5 px-2 py-1 rounded">
+                      {(parseFloat(formData.qualityThreshold || "0.7") * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <p className="text-xs text-foreground/40 mt-1">
+                    Only pay for tasks that meet this quality score
+                  </p>
+                </div>
+
+                {/* Delegation Status */}
+                {delegationCreated ? (
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle2 className="w-5 h-5 text-green-400" />
+                      <span className="text-green-400 font-semibold">Payment Authorization Active</span>
+                    </div>
+                    <p className="text-sm text-foreground/60 mb-2">
+                      AI agents can now automatically pay annotators within your specified limits.
+                    </p>
+                    {delegation && (
+                      <div className="text-xs text-foreground/40">
+                        <p>Token: {delegation.token.substring(0, 20)}...</p>
+                        <p>Expires: {new Date(delegation.expiresAt).toLocaleDateString()}</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={createPaymentDelegation}
+                    disabled={creatingDelegation || !formData.reward || !formData.projectName}
+                    className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {creatingDelegation ? "Creating Authorization..." : "Authorize AI Payments"}
+                  </button>
+                )}
+              </div>
+
+              {/* Existing Reward Distribution Info */}
               <div className="bg-white/5 border border-white/10 rounded-lg p-4">
                 <h4 className="font-semibold mb-2">Reward Distribution</h4>
                 <p className="text-sm text-foreground/60">
@@ -438,8 +594,8 @@ export default function CreateProject() {
               <button
                 onClick={handleNext}
                 disabled={
-                  (step === 1 && (!formData.projectName || !formData.instruction || !formData.category || !ownerInfo.accountId)) || // Renamed
-                  (step === 2 && !formData.reward)
+                  (step === 1 && (!formData.projectName || !formData.instruction || !formData.category || !ownerInfo.accountId)) ||
+                  (step === 2 && (!formData.reward || !delegationCreated)) // NEW: Require delegation
                 }
                 className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 neon-glow"
               >
