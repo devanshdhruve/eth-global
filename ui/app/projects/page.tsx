@@ -6,7 +6,7 @@ import { Footer } from "@/components/footer"
 import { Search, Filter, Users, TrendingUp, Loader2, AlertCircle, Folder, FolderCheck, Wallet } from "lucide-react"
 import Link from "next/link"
 import { motion } from "framer-motion"
-import { useWallet } from "../../context/wallet" 
+import { useWallet } from "../../context/wallet"
 
 
 interface Project {
@@ -41,7 +41,7 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<"available" | "myProjects">("available")
 
- 
+
   const { walletAddress, loading: walletLoading } = useWallet()
 
   // This function fetches project data from your API
@@ -79,7 +79,6 @@ export default function ProjectsPage() {
       // Cleanup the interval when the component unmounts or walletAddress changes
       return () => clearInterval(interval)
     } else {
-
       setProjects({ available: [], myProjects: [] })
       setLoading(false)
     }
@@ -142,7 +141,6 @@ export default function ProjectsPage() {
         </section>
       ) : (
         <>
-
           <section className="py-12 px-4 border-b border-white/10">
             <div className="max-w-7xl mx-auto">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -231,94 +229,92 @@ export default function ProjectsPage() {
                     </button>
                   </div>
                 </div>
-            </div>
-          ) : filteredProjects.length > 0 ? (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredProjects.map((item, i) => {
-                // Handle both Project and MyProject types
-                const project = 'project' in item ? item.project : item;
-                const screeningStatus = 'screeningStatus' in item ? item.screeningStatus : undefined;
+              ) : filteredProjects.length > 0 ? (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredProjects.map((item, i) => {
+                    const project = 'project' in item ? item.project : item;
+                    const screeningStatus = 'screeningStatus' in item ? item.screeningStatus : undefined;
 
-                return (
-                <motion.div
-                  key={project.projectId}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: i * 0.1 }}
-                  className="group"
-                >
-                  {/* Link logic:
-                    - If in "available" view (not screened yet) → Go to screening
-                    - If in "myProjects" view:
-                      - If passed → Go to annotation page
-                      - If failed → Show as disabled (no link or go to project detail with error)
-                  */}
-                  <Link href={
-                    view === 'available' 
-                      ? `/projects/screening?projectId=${project.projectId}&instruction=${encodeURIComponent(project.instruction)}`
-                      : screeningStatus === 'passed'
-                        ? `/projects/${project.projectId}`
-                        : '#'
-                  }>
-                    <div className={`bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl transition-all duration-300 hover:bg-white/10 hover:border-white/20 h-full flex flex-col overflow-hidden ${screeningStatus === 'failed' ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
-                      <div className="relative h-40 overflow-hidden bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center">
-                          <div className="text-6xl">📊</div>
-                          <div className="absolute top-3 right-3 px-3 py-1 backdrop-blur-sm rounded-full text-xs font-semibold border">
-                            {screeningStatus === 'failed' ? (
-                              <span className="px-2 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-full">Screening Failed</span>
-                            ) : screeningStatus === 'passed' ? (
-                              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-full">Ready to Annotate</span>
-                            ) : (
-                              <span className="px-2 py-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded-full">Open</span>
-                            )}
+                    return (
+                      <motion.div
+                        key={project.projectId}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.6, delay: i * 0.1 }}
+                        className="group"
+                      >
+                        {/* ✅ FIX: Main container is a div, not a Link, to prevent nesting errors. */}
+                        <div className={`bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl transition-all duration-300 hover:bg-white/10 hover:border-white/20 h-full flex flex-col overflow-hidden ${screeningStatus === 'failed' ? 'opacity-60' : ''}`}>
+                          
+                          {/* Card Header */}
+                          <div className="relative h-40 overflow-hidden bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center">
+                            <div className="text-6xl">📊</div>
+                            <div className="absolute top-3 right-3 text-xs font-semibold">
+                              {screeningStatus === 'failed' ? (
+                                <span className="px-2 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-full">Screening Failed</span>
+                              ) : screeningStatus === 'passed' ? (
+                                <span className="px-2 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-full">Ready to Annotate</span>
+                              ) : (
+                                <span className="px-2 py-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded-full">Open</span>
+                              )}
+                            </div>
                           </div>
+
+                          {/* ✅ FIX: Card Body is now a sibling of the header, not a child. */}
                           <div className="p-6 flex flex-col flex-grow">
-                            <h3 className="text-lg font-bold mt-2 group-hover:text-blue-400 transition-colors">
+                            <h3 className="text-lg font-bold group-hover:text-blue-400 transition-colors">
                               {project.projectId}
                             </h3>
-                            <p className="text-sm text-foreground/60 mb-4 flex-grow">
+                            <p className="text-sm text-foreground/60 mb-4">
                               Annotation project with {project.taskCount} tasks.
                             </p>
-                            <div className="grid grid-cols-2 gap-3 mb-4 pb-4 border-b border-white/10">
+                            
+                            {/* Stats */}
+                            <div className="grid grid-cols-2 gap-3 mt-auto pt-4 border-t border-white/10">
                               <div>
-                                  <div className="flex items-center gap-1 mb-1">
-                                      <TrendingUp size={14} className="text-teal-400" />
-                                      <span className="text-xs text-foreground/60">Reward</span>
-                                  </div>
-                                  <p className="text-sm font-semibold text-foreground">{project.reward} HBAR</p>
+                                <div className="flex items-center gap-1 mb-1">
+                                  <TrendingUp size={14} className="text-teal-400" />
+                                  <span className="text-xs text-foreground/60">Reward</span>
+                                </div>
+                                <p className="text-sm font-semibold text-foreground">{project.reward} HBAR</p>
                               </div>
                               <div>
-                                  <div className="flex items-center gap-1 mb-1">
-                                      <Users size={14} className="text-blue-400" />
-                                      <span className="text-xs text-foreground/60">Tasks</span>
-                                  </div>
-                                  <p className="text-sm font-semibold text-foreground">{project.taskCount}</p>
+                                <div className="flex items-center gap-1 mb-1">
+                                  <Users size={14} className="text-blue-400" />
+                                  <span className="text-xs text-foreground/60">Tasks</span>
+                                </div>
+                                <p className="text-sm font-semibold text-foreground">{project.taskCount}</p>
                               </div>
                             </div>
-                            <button className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow">
-                              {view === 'available' ? 'Start Screening' : 'Start Annotating'}
-                            </button>
+
+                            {/* ✅ FIX: Consolidated and simplified button logic. */}
+                            <div className="mt-4">
+                              {screeningStatus === 'failed' ? (
+                                <Link href={`/projects/${project.projectId}`} className="w-full block text-center px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg font-semibold text-red-300 hover:bg-red-500/30 transition-all duration-300">
+                                  View Details
+                                </Link>
+                              ) : (
+                                <Link
+                                  href={
+                                    view === 'available'
+                                      ? `/projects/screening?projectId=${project.projectId}&instruction=${encodeURIComponent(project.instruction)}`
+                                      : `/projects/${project.projectId}`
+                                  }
+                                  className="w-full block text-center px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow"
+                                >
+                                  {view === 'available' ? 'Start Screening' : 'Start Annotating'}
+                                </Link>
+                              )}
+                            </div>
                           </div>
-                          {/* MODIFIED: The button text makes more sense now */}
-                          <div className="mt-4">
-                            {screeningStatus === 'failed' ? (
-                              <Link href={`/projects/${project.projectId}`} className="w-full inline-block px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg font-semibold text-red-300 hover:bg-red-500/30 transition-all duration-300 text-center">View Details</Link>
-                            ) : (
-                              <button className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow">
-                                {view === 'available' ? 'Start Screening' : 'Start Annotating'}
-                              </button>
-                            )}
-                          </div>
-                      </div>
-                    </div>
-                  </Link>
-                </motion.div>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="text-center py-20">
-                <div className="bg-white/5 border border-white/10 rounded-lg p-12 max-w-md mx-auto">
+                        </div>
+                      </motion.div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-20">
+                  <div className="bg-white/5 border border-white/10 rounded-lg p-12 max-w-md mx-auto">
                     <p className="text-foreground/60 text-lg mb-2">No projects found in this category</p>
                     <p className="text-foreground/40 text-sm">
                       {view === 'available' ? 'Check back later or switch to "Your Projects".' : 'Pass a screening in "Available Projects" to see them here.'}

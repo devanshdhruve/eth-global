@@ -1,14 +1,12 @@
-// /app/api/annotations/submit/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import {
   Client,
   PrivateKey,
   TopicMessageSubmitTransaction,
 } from "@hashgraph/sdk";
 
-const TASK_COMPLETION_TOPIC_ID = process.env.TASK_COMPLETION_TOPIC_ID;
+const TASK_COMPLETION_TOPIC_ID = process.env.COMPLETION_TOPICS_ID;
 const SCREENING_TOPIC_ID = process.env.SCREENING_TOPICS_ID;
 const MIRROR_NODE_URL = "https://testnet.mirrornode.hedera.com";
 
@@ -27,9 +25,9 @@ interface AnnotationSubmission {
     notes?: string;
     confidence?: number;
   };
+  walletAddress: string; 
 }
 
-// Helper function to fetch messages from a topic
 async function fetchTopicMessages(topicId: string) {
   const response = await fetch(
     `${MIRROR_NODE_URL}/api/v1/topics/${topicId}/messages?limit=100&order=desc`
@@ -43,7 +41,6 @@ async function fetchTopicMessages(topicId: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    // Check authentication
     const { userId } = await auth();
 
     if (!userId) {
@@ -53,25 +50,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get user's wallet address from Clerk metadata
-    const clerk = await clerkClient();
-    const user = await clerk.users.getUser(userId);
-    const walletAddress = user.publicMetadata?.walletAddress as string | undefined;
+    const body: AnnotationSubmission = await req.json();
+    const { projectId, taskId, annotation, walletAddress } = body;
 
     if (!walletAddress) {
       return NextResponse.json(
         { 
           success: false, 
-          error: "Wallet address not found. Please set up your wallet in profile settings." 
+          error: "Wallet address was not provided in the request body." 
         },
         { status: 400 }
       );
     }
-
-    // Parse request body
-    const body: AnnotationSubmission = await req.json();
-    const { projectId, taskId, annotation } = body;
-
+    
     if (!projectId || taskId === undefined || !annotation || !annotation.label) {
       return NextResponse.json(
         { 
@@ -82,7 +73,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate environment variables
     const operatorId = process.env.HEDERA_TESTNET_ACCOUNT_ID;
     const operatorKey = process.env.HEDERA_TESTNET_PRIVATE_KEY;
 
@@ -94,12 +84,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 1: Verify user passed screening for this project
-    console.log(`📡 Verifying screening status for user ${userId} on project ${projectId}...`);
     const screeningMessages = await fetchTopicMessages(SCREENING_TOPIC_ID);
     
     let userPassed = false;
-
     for (const msg of screeningMessages) {
       try {
         const messageString = Buffer.from(msg.message, "base64").toString("utf-8");
@@ -126,13 +113,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`✅ User has passed screening for project ${projectId}`);
-
-    // Step 2: Configure Hedera client
     const client = Client.forTestnet();
     client.setOperator(operatorId, PrivateKey.fromStringECDSA(operatorKey));
 
-    // Step 3: Create structured message payload
     const messagePayload = {
       type: "TASK_COMPLETED",
       projectId,
@@ -148,20 +131,13 @@ export async function POST(req: NextRequest) {
       version: "1.0",
     };
 
-    console.log(`📝 Submitting annotation for task ${taskId} in project ${projectId}...`);
-
-    // Step 4: Submit to HCS
     const transaction = await new TopicMessageSubmitTransaction({
       topicId: TASK_COMPLETION_TOPIC_ID,
       message: JSON.stringify(messagePayload),
     }).execute(client);
 
-    // Step 5: Get receipt
     const receipt = await transaction.getReceipt(client);
     const transactionStatus = receipt.status;
-
-    console.log(`✅ Annotation submitted with status: ${transactionStatus.toString()}`);
-    console.log(`Transaction ID: ${transaction.transactionId?.toString()}`);
 
     return NextResponse.json({
       success: true,
@@ -176,7 +152,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error("❌ Failed to submit annotation:", error);
+    console.error("Failed to submit annotation:", error);
     return NextResponse.json(
       {
         success: false,

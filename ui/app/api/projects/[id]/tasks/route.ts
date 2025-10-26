@@ -11,6 +11,7 @@ const PINATA_GATEWAY = process.env.PINATA_GATEWAY || "https://gateway.pinata.clo
 interface HCSProject {
   event: string;
   projectId: string;
+  instruction: string; // Added instruction field
   tasks: Array<{
     taskId: number;
     ipfsHash: string;
@@ -91,17 +92,18 @@ export async function GET(
     const screeningMessages = await fetchTopicMessages(SCREENING_TOPIC_ID);
     
     let userPassed = false;
-
+    // Process newest first to find the most recent attempt
     for (const msg of screeningMessages) {
       try {
         const messageString = Buffer.from(msg.message, "base64").toString("utf-8");
         const resultData: HCSScreeningResult = JSON.parse(messageString);
 
-        if (resultData.projectId === projectId && 
-            resultData.userId === userId && 
-            resultData.status === 'passed') {
-          userPassed = true;
-          break;
+        if (resultData.projectId === projectId && resultData.userId === userId) {
+          if (resultData.status === 'passed') {
+            userPassed = true;
+          }
+          // If most recent attempt is fail or pass, we found it.
+          break; 
         }
       } catch (err) {
         console.warn("Could not parse a screening message:", err);
@@ -122,6 +124,8 @@ export async function GET(
     const projectMessages = await fetchTopicMessages(PROJECT_TOPICS_ID);
     
     let projectTasks: Array<{ taskId: number; ipfsHash: string }> | null = null;
+    let projectInstruction: string | null = null; // Variable to hold the instruction
+
 
     for (const msg of projectMessages) {
       try {
@@ -130,6 +134,7 @@ export async function GET(
 
         if (projectData.event === "new_project" && projectData.projectId === projectId) {
           projectTasks = projectData.tasks;
+          projectInstruction = projectData.instruction; // Capture the instruction
           break;
         }
       } catch (err) {
@@ -181,6 +186,7 @@ export async function GET(
     return NextResponse.json({
       success: true,
       projectId,
+      instruction: projectInstruction, // Return the instruction
       tasks: fetchedTasks,
       totalTasks: fetchedTasks.length,
       timestamp: new Date().toISOString(),

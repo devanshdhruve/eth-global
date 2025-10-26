@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { ArrowLeft, Save, CheckCircle, AlertCircle, Loader2, Tag, FileText, Clock, Award, ChevronRight, ChevronLeft } from "lucide-react"
+import { ArrowLeft, Save, CheckCircle, AlertCircle, Loader2, Tag, FileText, Clock, Award, ChevronLeft } from "lucide-react"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { motion } from "framer-motion"
+import { useWallet } from "@/context/wallet"
 
 interface Project {
   projectId: string
@@ -44,14 +45,13 @@ export default function AnnotationPage() {
   const params = useParams()
   const router = useRouter()
   const projectId = params.id as string
+  const { walletAddress } = useWallet()
 
-  // State for project and tasks
   const [project, setProject] = useState<Project | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // State for annotation
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
   const [annotations, setAnnotations] = useState<Record<number, AnnotationData>>({})
@@ -61,7 +61,6 @@ export default function AnnotationPage() {
   const [confidence, setConfidence] = useState(5)
   const [showAnnotation, setShowAnnotation] = useState(false)
 
-  // Fetch project data
   useEffect(() => {
     async function fetchProject() {
       try {
@@ -81,7 +80,6 @@ export default function AnnotationPage() {
 
         setProject(data.project)
 
-        // Check if user can annotate
         if (!data.project.canAnnotate) {
           setError(
             data.project.userScreeningStatus === 'failed'
@@ -92,7 +90,6 @@ export default function AnnotationPage() {
           return
         }
 
-        // Fetch tasks
         const tasksResponse = await fetch(`/api/projects/${projectId}/tasks`)
         const tasksData = await tasksResponse.json()
 
@@ -119,15 +116,16 @@ export default function AnnotationPage() {
   }, [projectId])
 
   const currentTask = tasks[currentTaskIndex]
+  const isLastTask = tasks.length > 0 && currentTaskIndex === tasks.length - 1
+  const allTasksCompleted = tasks.length > 0 && Object.keys(annotations).length === tasks.length
   const progress = tasks.length > 0 ? ((Object.keys(annotations).length) / tasks.length) * 100 : 0
 
   const handleAnnotate = async () => {
-    if (!selectedLabel) {
-      alert("Please select a label before submitting")
-      return
+    if (!walletAddress) {
+      alert("Please connect your wallet before submitting.");
+      return;
     }
-
-    if (!project || !currentTask) {
+    if (!selectedLabel || !project || !currentTask) {
       alert("Project or task data not available")
       return
     }
@@ -135,7 +133,6 @@ export default function AnnotationPage() {
     setSaving(true)
 
     try {
-      // Submit annotation to API
       const response = await fetch("/api/annotations/submit", {
         method: "POST",
         headers: {
@@ -147,8 +144,9 @@ export default function AnnotationPage() {
           annotation: {
             label: selectedLabel,
             notes: notes,
-            confidence: confidence * 20, // Convert 1-5 to 20-100
+            confidence: confidence * 20,
           },
+          walletAddress,
         }),
       })
 
@@ -158,7 +156,6 @@ export default function AnnotationPage() {
         throw new Error(data.error || data.message || "Failed to submit annotation")
       }
 
-      // Save annotation locally
       setAnnotations(prev => ({
         ...prev,
         [currentTask.taskId]: {
@@ -171,7 +168,6 @@ export default function AnnotationPage() {
       setShowSuccess(true)
       setTimeout(() => setShowSuccess(false), 2000)
 
-      // Move to next task
       if (currentTaskIndex < tasks.length - 1) {
         setCurrentTaskIndex(currentTaskIndex + 1)
         setSelectedLabel(null)
@@ -183,6 +179,66 @@ export default function AnnotationPage() {
       alert(`Failed to submit annotation: ${err.message}`)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleFinalSubmit = async () => {
+    if (!walletAddress) {
+      alert("Please connect your wallet before submitting.");
+      return;
+    }
+    if (!selectedLabel || !project || !currentTask) {
+      alert("Please select a label and ensure project/task data is available.")
+      return
+    }
+
+    setSaving(true)
+    try {
+      const annotationResponse = await fetch("/api/annotations/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: project.projectId,
+          taskId: currentTask.taskId,
+          annotation: {
+            label: selectedLabel,
+            notes: notes,
+            confidence: confidence * 20,
+          },
+          walletAddress,
+        }),
+      })
+
+      const annotationData = await annotationResponse.json()
+      if (!annotationResponse.ok || !annotationData.success) {
+        throw new Error(annotationData.error || "Failed to submit final annotation")
+      }
+      
+      setAnnotations(prev => ({
+        ...prev,
+        [currentTask.taskId]: {
+          label: selectedLabel,
+          notes: notes,
+          confidence: confidence,
+        }
+      }))
+
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 2000)
+
+    } catch (err: any) {
+      console.error("Error during final submission:", err)
+      alert(`Failed to complete project: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSubmitClick = () => {
+    if (isLastTask) {
+      handleFinalSubmit()
+    } else {
+      handleAnnotate()
     }
   }
 
@@ -202,26 +258,6 @@ export default function AnnotationPage() {
     }
   }
 
-  const handleNext = () => {
-    if (currentTaskIndex < tasks.length - 1) {
-      setCurrentTaskIndex(currentTaskIndex + 1)
-      const nextAnnotation = annotations[tasks[currentTaskIndex + 1].taskId]
-      if (nextAnnotation) {
-        setSelectedLabel(nextAnnotation.label)
-        setNotes(nextAnnotation.notes)
-        setConfidence(nextAnnotation.confidence)
-      } else {
-        setSelectedLabel(null)
-        setNotes("")
-        setConfidence(5)
-      }
-    }
-  }
-
-  const isLastTask = tasks.length > 0 && currentTaskIndex === tasks.length - 1
-  const allTasksCompleted = tasks.length > 0 && Object.keys(annotations).length === tasks.length
-
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
@@ -237,7 +273,6 @@ export default function AnnotationPage() {
     )
   }
 
-  // Error state
   if (error || !project) {
     return (
       <div className="min-h-screen bg-background">
@@ -269,13 +304,10 @@ export default function AnnotationPage() {
     )
   }
 
-  // If not showing annotation interface, show project overview
   if (!showAnnotation) {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
-
-        {/* Project Overview */}
         <section className="py-12 px-4">
           <div className="max-w-7xl mx-auto">
             <motion.div
@@ -290,7 +322,6 @@ export default function AnnotationPage() {
                 <ArrowLeft size={20} />
                 Back to Projects
               </button>
-
               <div className="glass p-8 mb-8">
                 <div className="flex items-start justify-between mb-6">
                   <div>
@@ -302,8 +333,6 @@ export default function AnnotationPage() {
                     <div className="text-2xl font-bold text-teal-400">{project.reward} HBAR</div>
                   </div>
                 </div>
-
-                {/* Project Stats */}
                 <div className="grid md:grid-cols-3 gap-6 mb-8">
                   <div className="bg-white/5 border border-white/10 rounded-lg p-6">
                     <div className="flex items-center gap-2 text-foreground/60 mb-2">
@@ -327,8 +356,6 @@ export default function AnnotationPage() {
                     <div className="text-3xl font-bold">{tasks.length * 2} min</div>
                   </div>
                 </div>
-
-                {/* Progress */}
                 {Object.keys(annotations).length > 0 && (
                   <div className="mb-8">
                     <div className="flex items-center justify-between mb-2">
@@ -345,8 +372,6 @@ export default function AnnotationPage() {
                     </div>
                   </div>
                 )}
-
-                {/* Guidelines */}
                 <div className="bg-white/5 border border-white/10 rounded-lg p-6 mb-8">
                   <h3 className="text-lg font-bold mb-4">Annotation Guidelines</h3>
                   <ul className="space-y-3 text-foreground/70">
@@ -372,7 +397,6 @@ export default function AnnotationPage() {
                     </li>
                   </ul>
                 </div>
-
                 <button
                   onClick={() => setShowAnnotation(true)}
                   className="w-full px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all text-lg"
@@ -383,21 +407,16 @@ export default function AnnotationPage() {
             </motion.div>
           </div>
         </section>
-
         <Footer />
       </div>
     )
   }
 
-  // Annotation Workspace
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
-
-      {/* Annotation Interface */}
       <section className="flex-1 py-6 px-4">
         <div className="max-w-5xl mx-auto">
-          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div>
               <button
@@ -415,8 +434,6 @@ export default function AnnotationPage() {
               <div className="text-lg font-bold text-teal-400">{project.reward} HBAR</div>
             </div>
           </div>
-
-          {/* Progress Bar */}
           <div className="glass p-4 mb-6">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-foreground/70">
@@ -431,8 +448,6 @@ export default function AnnotationPage() {
               />
             </div>
           </div>
-
-          {/* Success Message */}
           {showSuccess && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
@@ -446,8 +461,6 @@ export default function AnnotationPage() {
               </div>
             </motion.div>
           )}
-
-          {/* Completion Screen */}
           {allTasksCompleted ? (
             <div className="glass p-12 text-center">
               <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-6" />
@@ -468,7 +481,6 @@ export default function AnnotationPage() {
             </div>
           ) : (
             <>
-              {/* Task Text */}
               <div className="glass p-8 mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <FileText className="text-blue-400" />
@@ -478,8 +490,6 @@ export default function AnnotationPage() {
                   <p className="text-lg leading-relaxed">{currentTask?.text || "Loading task..."}</p>
                 </div>
               </div>
-
-              {/* Label Selection */}
               <div className="glass p-8 mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <Tag className="text-purple-400" />
@@ -503,8 +513,6 @@ export default function AnnotationPage() {
                     </button>
                   ))}
                 </div>
-
-                {/* Notes */}
                 <div className="mb-4">
                   <label className="block text-sm font-semibold mb-2">Notes (Optional)</label>
                   <textarea
@@ -515,8 +523,6 @@ export default function AnnotationPage() {
                     rows={3}
                   />
                 </div>
-
-                {/* Confidence Slider */}
                 <div>
                   <label className="block text-sm font-semibold mb-2">
                     Confidence Level: {confidence}/5
@@ -535,8 +541,6 @@ export default function AnnotationPage() {
                   </div>
                 </div>
               </div>
-
-              {/* Navigation */}
               <div className="flex gap-4">
                 <button
                   onClick={handlePrevious}
@@ -546,44 +550,33 @@ export default function AnnotationPage() {
                   <ChevronLeft size={20} />
                   Previous
                 </button>
-
                 <button
-                  onClick={handleAnnotate}
+                  onClick={handleSubmitClick}
                   disabled={!selectedLabel || saving}
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {saving ? (
                     <>
                       <Loader2 className="animate-spin" size={20} />
-                      Saving...
+                      Submitting...
                     </>
                   ) : isLastTask ? (
                     <>
                       <CheckCircle size={20} />
-                      Complete
+                      Submit
                     </>
                   ) : (
                     <>
                       <Save size={20} />
-                      Save & Continue
+                      Submit and Next
                     </>
                   )}
-                </button>
-
-                <button
-                  onClick={handleNext}
-                  disabled={isLastTask}
-                  className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 rounded-lg font-semibold hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                  <ChevronRight size={20} />
                 </button>
               </div>
             </>
           )}
         </div>
       </section>
-
       <Footer />
     </div>
   )
