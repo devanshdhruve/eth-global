@@ -1,3 +1,5 @@
+// lib/projectUpload.ts - Updated with Delegation Token Support
+
 import { Client, PrivateKey, TopicMessageSubmitTransaction } from '@hashgraph/sdk';
 
 export type TaskStatus = "pending" | "assigned" | "in_progress" | "submitted" | "verified" | "rejected";
@@ -7,39 +9,42 @@ export interface Task {
   taskId: number;
   ipfsHash: string;
   status: TaskStatus;
-  assignedTo?: string; // Wallet address or account ID
+  assignedTo?: string;
   submittedAt?: string;
   verifiedAt?: string;
   raw?: any;
 }
 
 export interface ProjectOwner {
-  accountId: string; // Hedera account ID (e.g., "0.0.12345")
-  walletAddress?: string; // EVM wallet address if applicable
-  name?: string; // Optional display name
-  email?: string; // Optional contact email
+  accountId: string;
+  walletAddress?: string;
+  name?: string;
+  email?: string;
 }
 
+// 🆕 UPDATED: Added delegationToken field
 export interface Project {
   projectId: string;
-  projectName?: string; // Human-readable project name
-  instruction?: string; // Project description
-  owner: ProjectOwner; // ✅ Added owner information
+  projectName?: string;
+  instruction?: string;
+  owner: ProjectOwner;
   taskCount: number;
   reward: number;
   status: ProjectStatus;
   tasks: Task[];
   createdAt: Date;
   updatedAt?: Date;
-  category?: string; // e.g., "Healthcare", "NLP", etc.
+  category?: string;
+  delegationToken?: string; // 🆕 NEW: Payment delegation token
 }
 
+// 🆕 UPDATED: Added delegation fields to HCS messages
 export interface ProjectMessage {
   event: "new_project" | "task_updated" | "project_status_changed";
   projectId: string;
   projectName?: string;
   instruction?: string;
-  owner: ProjectOwner; // ✅ Include owner in HCS messages
+  owner: ProjectOwner;
   taskCount: number;
   reward: number;
   tasks: Array<{
@@ -51,12 +56,16 @@ export interface ProjectMessage {
   projectStatus: ProjectStatus;
   timestamp: string;
   category?: string;
+  
+  // 🆕 NEW: Delegation fields
+  delegationToken?: string;
+  hasDelegation?: boolean;
 
   updatedTask?: {
     taskId: number;
     oldStatus: TaskStatus;
     newStatus: TaskStatus;
-    updatedBy?: string; // Who updated the task
+    updatedBy?: string;
   };
 }
 
@@ -71,7 +80,6 @@ export interface TaskStatusStats {
   completionRate: number;
 }
 
-
 export class TaskManagerServer {
   private client: Client;
   private topicId: string;
@@ -84,36 +92,26 @@ export class TaskManagerServer {
     );
   }
 
-  /**
-   * Calculate project status based on task statuses
-   */
   calculateProjectStatus(tasks: Task[]): ProjectStatus {
     if (tasks.length === 0) return "open";
 
     const stats = this.getTaskStatusStats(tasks);
 
-    // If all tasks are verified, project is completed
     if (stats.verified === stats.total) {
       return "completed";
     }
-
 
     if (stats.assigned > 0 || stats.in_progress > 0 || stats.submitted > 0) {
       return "in_progress";
     }
 
-    // If all tasks are pending, project is open
     if (stats.pending === stats.total) {
       return "open";
     }
 
-    // Mixed state or some verified - in progress
     return "in_progress";
   }
 
-  /**
-   * Get statistics about task statuses
-   */
   getTaskStatusStats(tasks: Task[]): TaskStatusStats {
     const stats: TaskStatusStats = {
       total: tasks.length,
@@ -138,7 +136,7 @@ export class TaskManagerServer {
           stats.in_progress++;
           break;
         case "submitted":
-          stats.submitted++;``
+          stats.submitted++;
           break;
         case "verified":
           stats.verified++;
@@ -157,29 +155,33 @@ export class TaskManagerServer {
   }
 
   /**
-   * Submit project to HCS with owner information
+   * 🆕 UPDATED: Submit project to HCS WITH delegation token
    */
   async submitProjectToHCS(project: Project): Promise<string> {
     try {
-      // Ensure all tasks have a status (default to pending if not set)
       const tasksWithStatus = project.tasks.map(t => ({
         ...t,
         status: t.status || "pending" as TaskStatus
       }));
 
-      // Calculate project status
       const projectStatus = this.calculateProjectStatus(tasksWithStatus);
 
+      // 🆕 Create HCS message with delegation token
       const message: ProjectMessage = {
         event: "new_project",
         projectId: project.projectId,
         projectName: project.projectName,
         instruction: project.instruction,
-        owner: project.owner, // ✅ Include owner info
+        owner: project.owner,
         taskCount: project.taskCount,
         reward: project.reward,
         projectStatus,
         category: project.category,
+        
+        // 🆕 INCLUDE DELEGATION TOKEN
+        delegationToken: project.delegationToken,
+        hasDelegation: !!project.delegationToken,
+        
         tasks: tasksWithStatus.map(t => ({
           taskId: t.taskId,
           ipfsHash: t.ipfsHash,
@@ -201,6 +203,7 @@ export class TaskManagerServer {
 
       console.log(`✅ Project submitted to HCS topic ${this.topicId}`);
       console.log(`👤 Owner: ${project.owner.accountId}`);
+      console.log(`🔐 Delegation: ${project.delegationToken ? 'YES' : 'NO'}`);
       console.log(`📝 Transaction ID: ${transaction.transactionId.toString()}`);
       console.log(`⏰ Consensus timestamp: ${receipt.consensusTimestamp?.toString()}`);
       console.log(`📊 Project Status: ${projectStatus}`);
@@ -212,18 +215,14 @@ export class TaskManagerServer {
     }
   }
 
-  /**
-   * Update a single task's status and publish to HCS
-   */
   async updateTaskStatus(
     project: Project,
     taskId: number,
     newStatus: TaskStatus,
-    updatedBy?: string, // Who is updating (annotator or owner)
+    updatedBy?: string,
     assignedTo?: string
   ): Promise<string> {
     try {
-      // Find and update the task
       const taskIndex = project.tasks.findIndex(t => t.taskId === taskId);
       if (taskIndex === -1) {
         throw new Error(`Task ${taskId} not found in project ${project.projectId}`);
@@ -240,7 +239,6 @@ export class TaskManagerServer {
         ...(newStatus === "verified" && { verifiedAt: new Date().toISOString() }),
       };
 
-      // Calculate new project status
       const projectStatus = this.calculateProjectStatus(updatedTasks);
 
       const message: ProjectMessage = {
@@ -248,11 +246,16 @@ export class TaskManagerServer {
         projectId: project.projectId,
         projectName: project.projectName,
         instruction: project.instruction,
-        owner: project.owner, // ✅ Always include owner
+        owner: project.owner,
         taskCount: project.taskCount,
         reward: project.reward,
         projectStatus,
         category: project.category,
+        
+        // 🆕 Include delegation in updates too
+        delegationToken: project.delegationToken,
+        hasDelegation: !!project.delegationToken,
+        
         tasks: updatedTasks.map(t => ({
           taskId: t.taskId,
           ipfsHash: t.ipfsHash,
@@ -263,7 +266,7 @@ export class TaskManagerServer {
           taskId,
           oldStatus,
           newStatus,
-          updatedBy, // Track who made the update
+          updatedBy,
         },
         timestamp: new Date().toISOString()
       };
@@ -290,9 +293,6 @@ export class TaskManagerServer {
     }
   }
 
-  /**
-   * Assign a task to an annotator
-   */
   async assignTask(
     project: Project,
     taskId: number,
@@ -303,14 +303,11 @@ export class TaskManagerServer {
       project,
       taskId,
       "assigned",
-      annotatorAddress, // The annotator is doing the assignment
+      annotatorAddress,
       annotatorAddress
     );
   }
 
-  /**
-   * Mark task as in progress
-   */
   async startTask(
     project: Project,
     taskId: number,
@@ -325,9 +322,6 @@ export class TaskManagerServer {
     );
   }
 
-  /**
-   * Submit completed task
-   */
   async submitTask(
     project: Project,
     taskId: number,
@@ -342,9 +336,6 @@ export class TaskManagerServer {
     );
   }
 
-  /**
-   * Verify and approve a task (owner only)
-   */
   async verifyTask(
     project: Project,
     taskId: number,
@@ -355,13 +346,10 @@ export class TaskManagerServer {
       project,
       taskId,
       "verified",
-      verifiedBy || project.owner.accountId // Default to owner
+      verifiedBy || project.owner.accountId
     );
   }
 
-  /**
-   * Reject a task (owner only)
-   */
   async rejectTask(
     project: Project,
     taskId: number,
@@ -372,21 +360,15 @@ export class TaskManagerServer {
       project,
       taskId,
       "rejected",
-      rejectedBy || project.owner.accountId // Default to owner
+      rejectedBy || project.owner.accountId
     );
   }
 
-  /**
-   * Check if user is the project owner
-   */
   isProjectOwner(project: Project, userAccountId: string): boolean {
     return project.owner.accountId === userAccountId || 
            project.owner.walletAddress === userAccountId;
   }
 
-  /**
-   * Get all projects by owner
-   */
   async getProjectsByOwner(projects: Project[], ownerAccountId: string): Project[] {
     return projects.filter(p => 
       p.owner.accountId === ownerAccountId || 
@@ -394,35 +376,133 @@ export class TaskManagerServer {
     );
   }
 
-  /**
-   * Get project completion percentage
-   */
   getProjectCompletion(tasks: Task[]): number {
     return this.getTaskStatusStats(tasks).completionRate;
   }
 
-  /**
-   * Check if project is fully completed
-   */
   isProjectComplete(tasks: Task[]): boolean {
     return this.calculateProjectStatus(tasks) === "completed";
   }
 
-  /**
-   * Get available (pending) tasks
-   */
   getAvailableTasks(tasks: Task[]): Task[] {
     return tasks.filter(t => t.status === "pending");
   }
 
-  /**
-   * Get tasks assigned to a specific annotator
-   */
   getAnnotatorTasks(tasks: Task[], annotatorAddress: string): Task[] {
     return tasks.filter(t => t.assignedTo === annotatorAddress);
   }
 
   cleanup() {
     this.client.close();
+  }
+}
+
+// 🆕 NEW: Utility function to retrieve project delegation from HCS
+export async function getProjectDelegation(
+  projectId: string,
+  topicId: string
+): Promise<string | null> {
+  try {
+    console.log(`🔍 Fetching delegation for project: ${projectId}`);
+    
+    // Query Hedera Mirror Node
+    const response = await fetch(
+      `https://testnet.mirrornode.hedera.com/api/v1/topics/${topicId}/messages?limit=100`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Mirror node query failed: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.messages || data.messages.length === 0) {
+      console.log('⚠️ No messages found in topic');
+      return null;
+    }
+    
+    // Find the project creation message
+    for (const msg of data.messages.reverse()) { // Reverse to get latest first
+      try {
+        const messageData: ProjectMessage = JSON.parse(
+          Buffer.from(msg.message, 'base64').toString('utf-8')
+        );
+        
+        if (
+          messageData.projectId === projectId &&
+          messageData.event === "new_project" &&
+          messageData.delegationToken
+        ) {
+          console.log(`✅ Found delegation token for project ${projectId}`);
+          return messageData.delegationToken;
+        }
+      } catch (e) {
+        // Skip invalid messages
+        continue;
+      }
+    }
+    
+    console.log(`⚠️ No delegation found for project ${projectId}`);
+    return null;
+  } catch (error: any) {
+    console.error('❌ Failed to fetch delegation from HCS:', error);
+    throw error;
+  }
+}
+
+// 🆕 NEW: Utility to get full project from HCS
+export async function getProjectFromHCS(
+  projectId: string,
+  topicId: string
+): Promise<Project | null> {
+  try {
+    const response = await fetch(
+      `https://testnet.mirrornode.hedera.com/api/v1/topics/${topicId}/messages?limit=100`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Mirror node query failed: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    // Find latest project message
+    for (const msg of data.messages.reverse()) {
+      try {
+        const messageData: ProjectMessage = JSON.parse(
+          Buffer.from(msg.message, 'base64').toString('utf-8')
+        );
+        
+        if (messageData.projectId === projectId) {
+          const project: Project = {
+            projectId: messageData.projectId,
+            projectName: messageData.projectName,
+            instruction: messageData.instruction,
+            owner: messageData.owner,
+            taskCount: messageData.taskCount,
+            reward: messageData.reward,
+            status: messageData.projectStatus,
+            category: messageData.category,
+            delegationToken: messageData.delegationToken, // 🆕 Include delegation
+            tasks: messageData.tasks.map(t => ({
+              taskId: t.taskId,
+              ipfsHash: t.ipfsHash,
+              status: t.status,
+              assignedTo: t.assignedTo,
+            })),
+            createdAt: new Date(messageData.timestamp),
+          };
+          
+          return project;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    return null;
+  } catch (error: any) {
+    console.error('❌ Failed to fetch project from HCS:', error);
+    throw error;
   }
 }

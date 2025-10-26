@@ -3,10 +3,10 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { Upload, ArrowRight, CheckCircle2, User, Shield } from "lucide-react"
+import { Upload, ArrowRight, CheckCircle2, User, Shield, AlertCircle, ExternalLink } from "lucide-react"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { createClientDelegation, ClientDelegationConfig } from "@/lib/delegation"
+import { createClientDelegation, ClientDelegationConfig } from "@/lib/ClientDelegationManager"
 import { PaymentDelegation } from "@/types/payment"
 
 interface Task {
@@ -27,10 +27,9 @@ export default function CreateProject() {
   const [step, setStep] = useState(1)
   const [formData, setFormData] = useState({
     projectName: "",
-    instruction: "", // Renamed from description
+    instruction: "",
     category: "",
     reward: "",
-    // NEW: Payment delegation fields
     maxPaymentPerTask: "",
     delegationDuration: "30",
     qualityThreshold: "0.7",
@@ -48,24 +47,44 @@ export default function CreateProject() {
   const [projectCreated, setProjectCreated] = useState(false)
   const [projectResponse, setProjectResponse] = useState<any>(null)
   
-  // NEW: Delegation state
+  // Delegation state
   const [delegationCreated, setDelegationCreated] = useState(false)
   const [creatingDelegation, setCreatingDelegation] = useState(false)
   const [delegationToken, setDelegationToken] = useState<string | null>(null)
   const [delegation, setDelegation] = useState<PaymentDelegation | null>(null)
+  const [delegationError, setDelegationError] = useState<string | null>(null)
 
-  // Simulate getting connected wallet info
+  // Get wallet info from window.ethereum (managed by Navbar)
   useEffect(() => {
-    // In a real app, you'd get this from your wallet connection
-    // For now, use demo data
-    const demoOwner = {
-      accountId: "0.0.123456", // Replace with actual connected wallet
-      walletAddress: "0x1234...5678",
-      name: "Demo User",
-      email: "user@example.com",
-    };
-    setOwnerInfo(demoOwner);
-  }, []);
+    const getWalletInfo = async () => {
+      if (window.ethereum) {
+        try {
+          const accounts = await window.ethereum.request({ method: "eth_accounts" })
+          if (accounts && accounts.length > 0) {
+            setOwnerInfo(prev => ({
+              ...prev,
+              walletAddress: accounts[0],
+              accountId: prev.accountId || `0.0.${Math.floor(Math.random() * 999999)}`,
+              name: prev.name || "Demo User",
+            }))
+          }
+        } catch (error) {
+          console.error("Error getting wallet info:", error)
+        }
+      }
+    }
+    
+    getWalletInfo()
+    
+    // Listen for account changes (handled by MetaMask)
+    if (window.ethereum) {
+      window.ethereum.on('accountsChanged', (accounts: string[]) => {
+        if (accounts.length > 0) {
+          setOwnerInfo(prev => ({ ...prev, walletAddress: accounts[0] }))
+        }
+      })
+    }
+  }, [])
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -79,10 +98,16 @@ export default function CreateProject() {
     setOwnerInfo((prev) => ({ ...prev, [name]: value }))
   }
 
-  // NEW: Delegation creation function
+  // Payment delegation creation
   const createPaymentDelegation = async () => {
     if (!window.ethereum) {
-      alert("Please connect your MetaMask wallet first")
+      alert("Please install MetaMask to create payment authorization")
+      window.open("https://metamask.io/download/", "_blank")
+      return
+    }
+
+    if (!ownerInfo.walletAddress) {
+      alert("Please connect your wallet first (use the Connect Wallet button in the navbar)")
       return
     }
 
@@ -92,17 +117,24 @@ export default function CreateProject() {
     }
 
     setCreatingDelegation(true)
+    setDelegationError(null)
     
     try {
       console.log("🔐 Creating payment delegation...")
       
+      // Calculate max payment per task
+      const rewardAmount = parseFloat(formData.reward)
+      const maxPerTask = formData.maxPaymentPerTask 
+        ? parseFloat(formData.maxPaymentPerTask) 
+        : rewardAmount / 10 // Default to 10% of total
+
       const delegationConfig: ClientDelegationConfig = {
-        maxPaymentPerTask: parseFloat(formData.maxPaymentPerTask) || parseFloat(formData.reward) / 10, // Default to 1/10 of total reward
-        maxTotalSpending: parseFloat(formData.reward),
+        maxPaymentPerTask: maxPerTask,
+        maxTotalSpending: rewardAmount,
         timeLimit: `${formData.delegationDuration}d`,
         qualityThreshold: parseFloat(formData.qualityThreshold),
-        allowedPaymentTypes: ["task-completion", "quality-bonus"],
-        projectId: formData.projectName
+        allowedPaymentTypes: ["task_completion", "quality_bonus"],
+        projectId: formData.projectName.toLowerCase().replace(/\s+/g, "_"),
       }
 
       console.log("📋 Delegation config:", delegationConfig)
@@ -114,11 +146,21 @@ export default function CreateProject() {
       setDelegationCreated(true)
       
       console.log("✅ Delegation created successfully!")
-      console.log("🔑 Token:", createdDelegation.token)
+      console.log("🔑 Token:", createdDelegation.token.substring(0, 30) + "...")
+      console.log("⏰ Expires:", createdDelegation.expiresAt)
       
     } catch (error: any) {
       console.error("❌ Delegation creation failed:", error)
-      alert("Failed to create payment authorization: " + error.message)
+      setDelegationError(error.message || "Failed to create payment authorization")
+      
+      // User-friendly error messages
+      if (error.message.includes("rejected")) {
+        alert("You rejected the signature request. Payment authorization was not created.")
+      } else if (error.message.includes("MetaMask")) {
+        alert(error.message)
+      } else {
+        alert("Failed to create payment authorization: " + error.message)
+      }
     } finally {
       setCreatingDelegation(false)
     }
@@ -143,9 +185,9 @@ export default function CreateProject() {
     try {
       const formDataToSend = new FormData()
       formDataToSend.append("file", file)
-      formDataToSend.append("projectId", formData.projectName || `project-${Date.now()}`)
+      formDataToSend.append("projectId", formData.projectName.toLowerCase().replace(/\s+/g, "_"))
       formDataToSend.append("projectName", formData.projectName)
-      formDataToSend.append("instruction", formData.instruction) // Renamed from description
+      formDataToSend.append("instruction", formData.instruction)
       formDataToSend.append("category", formData.category)
       formDataToSend.append("reward", formData.reward || "0")
       
@@ -154,6 +196,11 @@ export default function CreateProject() {
       formDataToSend.append("ownerWallet", ownerInfo.walletAddress)
       formDataToSend.append("ownerName", ownerInfo.name)
       formDataToSend.append("ownerEmail", ownerInfo.email)
+
+      // Add delegation token if created
+      if (delegationToken) {
+        formDataToSend.append("delegationToken", delegationToken)
+      }
 
       const res = await fetch("/api/upload", {
         method: "POST",
@@ -180,7 +227,7 @@ export default function CreateProject() {
       setFilesUploaded(true)
       setProjectResponse(data)
       
-      // Mark project as created since the backend already did it
+      // Mark project as created
       if (data.success && data.project) {
         setProjectCreated(true)
       }
@@ -244,6 +291,19 @@ export default function CreateProject() {
             <div className="space-y-6">
               <h2 className="text-2xl font-bold mb-6">Project Details</h2>
               
+              {/* Wallet Info Display */}
+              {!ownerInfo.walletAddress && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="w-5 h-5 text-blue-400" />
+                    <span className="text-blue-400 font-semibold">Wallet Connection Required</span>
+                  </div>
+                  <p className="text-sm text-foreground/60">
+                    Please connect your wallet using the "Connect Wallet" button in the navbar to continue.
+                  </p>
+                </div>
+              )}
+
               {/* Owner Information */}
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-6">
                 <div className="flex items-center gap-2 mb-3">
@@ -285,9 +345,16 @@ export default function CreateProject() {
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
                   />
                   <p className="text-xs text-foreground/40 mt-1">
-                    Connect your Hedera wallet or enter manually
+                    Your Hedera account for receiving project updates
                   </p>
                 </div>
+                {ownerInfo.walletAddress && (
+                  <div className="mt-3 p-2 bg-green-500/10 border border-green-500/20 rounded">
+                    <p className="text-xs text-green-400">
+                      ✓ Wallet Connected: {ownerInfo.walletAddress.substring(0, 10)}...{ownerInfo.walletAddress.substring(ownerInfo.walletAddress.length - 8)}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -304,12 +371,12 @@ export default function CreateProject() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Instruction *</label> 
+                <label className="block text-sm font-medium mb-2">Annotation Instructions *</label>
                 <textarea
-                  name="instruction" // Renamed from description
-                  value={formData.instruction} // Renamed from description
+                  name="instruction"
+                  value={formData.instruction}
                   onChange={handleInputChange}
-                  placeholder="Provide clear instructions for the annotators..." // Updated placeholder
+                  placeholder="Provide clear, detailed instructions for annotators. Include examples of what you're looking for..."
                   rows={4}
                   required
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
@@ -340,7 +407,7 @@ export default function CreateProject() {
             <div className="space-y-6">
               <h2 className="text-2xl font-bold mb-6">Budget & Payment Setup</h2>
               
-              {/* Existing Budget Section */}
+              {/* Budget Section */}
               <div>
                 <label className="block text-sm font-medium mb-2">Total Reward Pool (HBAR) *</label>
                 <input
@@ -355,11 +422,11 @@ export default function CreateProject() {
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
                 />
                 <p className="text-xs text-foreground/40 mt-1">
-                  This will be distributed among all tasks
+                  Total HBAR to be distributed among all completed tasks
                 </p>
               </div>
 
-              {/* NEW: Payment Delegation Section */}
+              {/* Payment Delegation Section */}
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <Shield className="w-5 h-5 text-blue-400" />
@@ -367,8 +434,8 @@ export default function CreateProject() {
                 </div>
                 
                 <p className="text-sm text-foreground/60 mb-4">
-                  Allow AI agents to automatically pay annotators when tasks are completed. 
-                  You maintain full control and can modify or revoke access anytime.
+                  Allow AI agents to automatically pay annotators when tasks meet quality standards. 
+                  You maintain full control and can revoke access anytime.
                 </p>
 
                 {/* Payment Rules */}
@@ -380,7 +447,7 @@ export default function CreateProject() {
                       name="maxPaymentPerTask"
                       value={formData.maxPaymentPerTask || ""}
                       onChange={handleInputChange}
-                      placeholder={formData.reward ? (parseFloat(formData.reward) / 10).toString() : "50"}
+                      placeholder={formData.reward ? (parseFloat(formData.reward) / 10).toFixed(2) : "50"}
                       step="0.01"
                       min="0"
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground placeholder-foreground/40 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
@@ -390,78 +457,126 @@ export default function CreateProject() {
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-2">Delegation Duration (days)</label>
+                    <label className="block text-sm font-medium mb-2">Authorization Duration</label>
                     <select
                       name="delegationDuration"
-                      value={formData.delegationDuration || "30"}
+                      value={formData.delegationDuration}
                       onChange={handleInputChange}
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-foreground focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
                     >
                       <option value="7">7 days</option>
                       <option value="30">30 days</option>
                       <option value="90">90 days</option>
+                      <option value="180">6 months</option>
                       <option value="365">1 year</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Quality Requirements */}
+                {/* Quality Threshold */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium mb-2">Quality Threshold</label>
+                  <label className="block text-sm font-medium mb-2">Minimum Quality Threshold</label>
                   <div className="flex items-center gap-4">
                     <input
                       type="range"
                       name="qualityThreshold"
-                      value={formData.qualityThreshold || "0.7"}
+                      value={formData.qualityThreshold}
                       onChange={handleInputChange}
                       min="0"
                       max="1"
-                      step="0.1"
+                      step="0.05"
                       className="flex-1"
                     />
-                    <span className="text-sm font-mono bg-white/5 px-2 py-1 rounded">
-                      {(parseFloat(formData.qualityThreshold || "0.7") * 100).toFixed(0)}%
+                    <span className="text-sm font-mono bg-white/5 px-3 py-1 rounded min-w-[60px] text-center">
+                      {(parseFloat(formData.qualityThreshold) * 100).toFixed(0)}%
                     </span>
                   </div>
                   <p className="text-xs text-foreground/40 mt-1">
-                    Only pay for tasks that meet this quality score
+                    Only approve payments for tasks meeting this quality score
                   </p>
                 </div>
 
                 {/* Delegation Status */}
+                {delegationError && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertCircle className="w-5 h-5 text-red-400" />
+                      <span className="text-red-400 font-semibold">Authorization Failed</span>
+                    </div>
+                    <p className="text-sm text-foreground/60">{delegationError}</p>
+                  </div>
+                )}
+
                 {delegationCreated ? (
                   <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <CheckCircle2 className="w-5 h-5 text-green-400" />
                       <span className="text-green-400 font-semibold">Payment Authorization Active</span>
                     </div>
-                    <p className="text-sm text-foreground/60 mb-2">
-                      AI agents can now automatically pay annotators within your specified limits.
+                    <p className="text-sm text-foreground/60 mb-3">
+                      AI agents can now automatically process payments within your specified limits.
                     </p>
                     {delegation && (
-                      <div className="text-xs text-foreground/40">
-                        <p>Token: {delegation.token.substring(0, 20)}...</p>
-                        <p>Expires: {new Date(delegation.expiresAt).toLocaleDateString()}</p>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-foreground/60">Max per Task:</span>
+                          <span className="font-mono">{delegation.rules.maxPaymentPerTask} HBAR</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-foreground/60">Total Budget:</span>
+                          <span className="font-mono">{delegation.rules.maxTotalSpending} HBAR</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-foreground/60">Expires:</span>
+                          <span className="font-mono">{new Date(delegation.expiresAt).toLocaleDateString()}</span>
+                        </div>
+                        <div className="pt-2 border-t border-green-500/20">
+                          <span className="text-foreground/60">Token:</span>
+                          <p className="font-mono text-[10px] text-green-400 break-all mt-1">
+                            {delegation.token.substring(0, 40)}...
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
                 ) : (
                   <button
                     onClick={createPaymentDelegation}
-                    disabled={creatingDelegation || !formData.reward || !formData.projectName}
-                    className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={creatingDelegation || !formData.reward || !formData.projectName || !ownerInfo.walletAddress}
+                    className="w-full px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
-                    {creatingDelegation ? "Creating Authorization..." : "Authorize AI Payments"}
+                    {creatingDelegation ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Creating Authorization...
+                      </>
+                    ) : !ownerInfo.walletAddress ? (
+                      "Connect Wallet to Continue"
+                    ) : (
+                      <>
+                        <Shield className="w-4 h-4" />
+                        Authorize AI Payments
+                      </>
+                    )}
                   </button>
+                )}
+
+                {!ownerInfo.walletAddress && (
+                  <p className="text-xs text-yellow-400 mt-2 text-center">
+                    ⚠️ Connect your wallet via navbar to create payment authorization
+                  </p>
                 )}
               </div>
 
-              {/* Existing Reward Distribution Info */}
+              {/* Reward Distribution Info */}
               <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-                <h4 className="font-semibold mb-2">Reward Distribution</h4>
-                <p className="text-sm text-foreground/60">
-                  Each task will receive an equal share of the total reward pool. The exact amount per task will be calculated after you upload your dataset.
-                </p>
+                <h4 className="font-semibold mb-2">Payment Details</h4>
+                <ul className="text-sm text-foreground/60 space-y-1">
+                  <li>• Each completed task receives an equal share of the reward pool</li>
+                  <li>• Payments are only processed for tasks meeting quality threshold</li>
+                  <li>• You can monitor and revoke authorization at any time</li>
+                  <li>• All transactions are recorded on Hedera blockchain</li>
+                </ul>
               </div>
             </div>
           )}
@@ -492,7 +607,10 @@ export default function CreateProject() {
 
               <div className="bg-white/5 border border-white/10 rounded-lg p-4">
                 <p className="text-sm text-foreground/60">
-                  Supported formats: CSV, JSON • Max file size: 500MB
+                  <strong>Supported formats:</strong> CSV, JSON • <strong>Max file size:</strong> 500MB
+                </p>
+                <p className="text-xs text-foreground/40 mt-2">
+                  Your data will be uploaded to IPFS and recorded on Hedera Consensus Service
                 </p>
               </div>
 
@@ -509,9 +627,16 @@ export default function CreateProject() {
                   <div className="bg-white/5 border border-white/10 rounded-lg p-4 max-h-64 overflow-y-auto">
                     <ul className="space-y-2">
                       {tasks.map((t) => (
-                        <li key={t.id} className="text-sm text-foreground/80 flex items-center justify-between">
+                        <li key={t.id} className="text-sm text-foreground/80 flex items-center justify-between py-2 border-b border-white/5 last:border-0">
                           <span>Task {t.id}</span>
-                          <span className="text-xs font-mono text-blue-400">{t.ipfsHash.substring(0, 12)}...</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-blue-400">{t.ipfsHash.substring(0, 12)}...</span>
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              t.status === 'uploaded' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                            }`}>
+                              {t.status}
+                            </span>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -523,7 +648,7 @@ export default function CreateProject() {
               {filesUploaded && projectResponse && (
                 <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-lg p-6 mt-6">
                   <h4 className="text-lg font-semibold mb-4">Project Summary</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="grid md:grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="text-foreground/60">Project Name:</span>
                       <p className="font-semibold">{projectResponse.project.projectName}</p>
@@ -571,7 +696,12 @@ export default function CreateProject() {
                     >
                       View Dashboard
                     </a>
-                    
+                    <a
+                      href="/projects"
+                      className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all"
+                    >
+                      Browse All Projects
+                    </a>
                   </div>
                 </div>
               )}
@@ -595,7 +725,7 @@ export default function CreateProject() {
                 onClick={handleNext}
                 disabled={
                   (step === 1 && (!formData.projectName || !formData.instruction || !formData.category || !ownerInfo.accountId)) ||
-                  (step === 2 && (!formData.reward || !delegationCreated)) // NEW: Require delegation
+                  (step === 2 && (!formData.reward || !delegationCreated))
                 }
                 className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 neon-glow"
               >
