@@ -1,6 +1,7 @@
 // /app/api/screening-result/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import {
   Client,
   PrivateKey,
@@ -12,6 +13,16 @@ import {
 // dotenv.config({ path: '/Users/veerchheda/coding/ethonline/eth-global/ui/.env' });
 
 export async function POST(req: NextRequest) {
+  // Check authentication
+  const { userId: authenticatedUserId } = await auth();
+  
+  if (!authenticatedUserId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized - Please sign in" },
+      { status: 401 }
+    );
+  }
+
   // 1. Get Operator Account Details from .env
   const operatorId = process.env.HEDERA_TESTNET_ACCOUNT_ID;
 const operatorKey = process.env.HEDERA_TESTNET_PRIVATE_KEY;
@@ -31,9 +42,12 @@ const operatorKey = process.env.HEDERA_TESTNET_PRIVATE_KEY;
     client.setOperator(operatorId, PrivateKey.fromStringECDSA(operatorKey));
 
     // 3. Parse the incoming request body
-    const { projectId, userId, score, status } = await req.json();
+    const { projectId, score, status } = await req.json();
+    
+    // Use the authenticated user ID
+    const userId = authenticatedUserId;
 
-    if (!projectId || !userId || score === undefined || !status) {
+    if (!projectId || score === undefined || !status) {
       return NextResponse.json(
         { success: false, error: "Missing required fields in request body." },
         { status: 400 }

@@ -5,7 +5,8 @@ import { Client, PrivateKey } from "@hashgraph/sdk";
 import { HederaLangchainToolkit, coreConsensusPlugin } from "hedera-agent-kit";
 import { ChatOpenAI } from "@langchain/openai";
 
-dotenv.config({ path: "/Users/veerchheda/coding/ethonline/eth-global/hedera/.env" });
+// Load .env from repo root or current directory
+dotenv.config();
 
 // ---------- INTERFACES ----------
 

@@ -1,6 +1,7 @@
 // /app/api/projects/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 
 const PROJECT_TOPICS_ID = process.env.PROJECT_TOPICS_ID;
 // NEW: Add your screening topic ID from .env
@@ -70,54 +71,70 @@ export const GET = async (req: NextRequest) => {
         } else if (projectData.event === "project_completed") {
           const existing = projectMap.get(projectData.projectId);
           if (existing) existing.status = "completed";
+        } else if (projectData.event === "project_failed") {
+          const existing = projectMap.get(projectData.projectId);
+          if (existing) existing.status = "failed";
         }
       } catch (err) {
         console.warn("Could not parse a project message:", err);
       }
     }
 
-    const allOpenProjects = Array.from(projectMap.values()).filter((p) => p.status === "open");
-    console.log(`✅ Found ${allOpenProjects.length} open projects.`);
+  const allProjects = Array.from(projectMap.values());
+  const allOpenProjects = allProjects.filter((p) => p.status === "open");
+  console.log(`✅ Found ${allOpenProjects.length} open projects (total projects: ${allProjects.length}).`);
 
     // --- Step 2: Fetch and process screening results for the current user ---
     
-    // TODO: Replace this with your actual user authentication logic
-    // This could come from a session, a JWT token, etc.
-    const currentUserId = "user-123-placeholder"; 
+    // Get the authenticated user ID from Clerk
+    const { userId } = await auth();
+    
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Unauthorized - Please sign in" },
+        { status: 401 }
+      );
+    }
     
     console.log(`📡 Fetching screening results from topic: ${SCREENING_TOPIC_ID}`);
     const screeningMessages = await fetchTopicMessages(SCREENING_TOPIC_ID);
-    const passedProjectIds = new Set<string>();
+  const passedProjectIds = new Set<string>();
+  const failedProjectIds = new Set<string>();
 
     for (const msg of screeningMessages) {
         try {
             const messageString = Buffer.from(msg.message, "base64").toString("utf-8");
             const resultData: HCSScreeningResult = JSON.parse(messageString);
 
-            // Check if the result is for the current user and if they passed
-            if (resultData.userId === currentUserId && resultData.status === 'passed') {
-                passedProjectIds.add(resultData.projectId);
-            }
+      // Check if the result is for the current user and record pass/fail
+      if (resultData.userId === userId) {
+        if (resultData.status === 'passed') passedProjectIds.add(resultData.projectId);
+        if (resultData.status === 'failed') failedProjectIds.add(resultData.projectId);
+      }
         } catch(err) {
             console.warn("Could not parse a screening message:", err);
         }
     }
-    console.log(`✅ User ${currentUserId} has passed screening for ${passedProjectIds.size} projects.`);
+  console.log(`✅ User ${userId} has passed screening for ${passedProjectIds.size} projects and failed ${failedProjectIds.size} projects.`);
 
 
     // --- Step 3: Categorize projects into "available" and "myProjects" ---
-    const availableProjects: HCSProject[] = [];
-    const myProjects: HCSProject[] = [];
+  const availableProjects: HCSProject[] = [];
+  // myProjects will include per-user screeningStatus metadata
+  const myProjects: Array<{ project: HCSProject; screeningStatus: 'passed' | 'failed' }> = [];
 
-    for (const project of allOpenProjects) {
-        if (passedProjectIds.has(project.projectId)) {
-            // If the user has a 'passed' record for this project, it's theirs
-            myProjects.push(project);
-        } else {
-            // Otherwise, it's available for them to screen
-            availableProjects.push(project);
-        }
+  for (const project of allOpenProjects) {
+    if (passedProjectIds.has(project.projectId)) {
+      // If the user has a 'passed' record for this project, it's theirs
+      myProjects.push({ project, screeningStatus: 'passed' });
+    } else if (failedProjectIds.has(project.projectId)) {
+      // If the user failed screening for this project, include it as failed
+      myProjects.push({ project, screeningStatus: 'failed' });
+    } else {
+      // Otherwise, it's available for them to screen
+      availableProjects.push(project);
     }
+  }
 
     // --- Step 4: Return the structured response ---
     return NextResponse.json({
