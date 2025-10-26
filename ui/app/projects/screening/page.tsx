@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { Navbar } from '@/components/navbar';
 import { Footer } from '@/components/footer';
 import { Bot, User, SendHorizontal, Loader2 } from 'lucide-react';
+import { useUser } from '@clerk/nextjs'; // --- ADDED ---
 
 interface Message {
   role: 'user' | 'bot';
@@ -45,6 +46,12 @@ function ScreeningChat() {
   const [answers, setAnswers] = useState<string[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
+  // --- ADDED ---
+  // Get Clerk user and wallet state
+  const { user } = useUser();
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  // --- END ADDED ---
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
 
@@ -55,6 +62,16 @@ function ScreeningChat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // --- ADDED ---
+  // Load wallet address from Clerk metadata on component load
+  useEffect(() => {
+    if (user?.publicMetadata?.wallet_address) {
+      setWalletAddress(user.publicMetadata.wallet_address as string);
+      console.log('Loaded wallet from profile:', user.publicMetadata.wallet_address);
+    }
+  }, [user]);
+  // --- END ADDED ---
 
   useEffect(() => {
     const instructionFromUrl = searchParams.get('instruction');
@@ -75,6 +92,54 @@ function ScreeningChat() {
   const addMessage = (role: 'user' | 'bot', content: string) => {
     setMessages(prev => [...prev, { role, content }]);
   };
+
+  // --- ADDED ---
+  // Wallet connection logic from reference
+  const connectWallet = async (): Promise<string | null> => {
+    if (typeof window === "undefined") {
+      console.warn("Not in browser environment.");
+      return null;
+    }
+    
+    if (!window.ethereum) {
+      addMessage('bot', 'Please install MetaMask to connect your wallet. You may need to refresh this page after installing.');
+      return null;
+    }
+
+    try {
+      // Request accounts from MetaMask
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+
+      const address = accounts[0];
+      setWalletAddress(address);
+      console.log("Connected wallet address:", address);
+
+      // Save to Clerk user metadata if user is logged in
+      if (user) {
+        try {
+          await user.update({
+            unsafeMetadata: {
+              ...user.unsafeMetadata,
+              wallet_address: address
+            }
+          });
+          console.log("Wallet address saved successfully to Clerk user metadata.");
+        } catch (clerkErr) {
+          console.error("Error saving wallet address to Clerk:", clerkErr);
+          // Don't block submission, just log the error
+        }
+      }
+      return address;
+
+    } catch (err: any) {
+      console.error("Wallet connection failed:", err);
+      addMessage('bot', `Failed to connect wallet: ${err.message || "Unknown error"}. Please try submitting again.`);
+      return null;
+    }
+  }
+  // --- END ADDED ---
   
   const handleInstructionSubmit = async (instructionText: string) => {
     // ... (logic is unchanged)
@@ -108,7 +173,7 @@ function ScreeningChat() {
   };
 
   const handleAnswerSubmit = async (answerText: string) => {
-    // ... (logic is unchanged)
+    // Add the user's answer
     addMessage('user', answerText);
     const newAnswers = [...answers, answerText];
     setAnswers(newAnswers);
@@ -116,13 +181,19 @@ function ScreeningChat() {
     const nextQuestionIndex = currentQuestionIndex + 1;
 
     if (nextQuestionIndex < questions.length) {
+      // Ask the next question
       setCurrentQuestionIndex(nextQuestionIndex);
       addMessage('bot', `**Question ${nextQuestionIndex + 1}:** ${questions[nextQuestionIndex]}`);
     } else {
+      // --- MODIFIED BLOCK ---
+      // This is the final answer. Start scoring, get wallet, and submit result.
       setIsLoading(true);
       setChatState('scoring');
       addMessage('bot', "Thank you. Evaluating your answers now...");
       
+      let scoreData: any;
+      
+      // 1. Get Score from the scoring API
       try {
         const scoreResponse = await fetch('http://127.0.0.1:8000/submit-screening', {
           method: 'POST',
@@ -135,26 +206,51 @@ function ScreeningChat() {
         });
 
         if (!scoreResponse.ok) throw new Error(`API error: ${scoreResponse.statusText}`);
-        const scoreData = await scoreResponse.json();
+        scoreData = await scoreResponse.json();
         if (scoreData.status === 'error') {
           throw new Error(scoreData.error_message || "Failed to get a score.");
         }
         
         const resultText = `**Screening Complete**\n\n**Assessment:** ${scoreData.assessment}\n\n**Score:** ${scoreData.score}/100`;
         addMessage('bot', resultText);
-        setChatState('finished');
-
+        
         const screeningStatus = scoreData.score > 50 ? 'passed' : 'failed';
-        addMessage('bot', `You have **${screeningStatus}** the screening. Recording result...`);
+        addMessage('bot', `You have **${screeningStatus}** the screening. Please connect your wallet to record the result.`);
 
-        const userId = "user-123-placeholder"; 
+      } catch (error: any) {
+        console.error("Failed to submit screening for scoring:", error);
+        addMessage('bot', `Sorry, an error occurred during scoring: ${error.message}`);
+        setChatState('finished');
+        setIsLoading(false);
+        return; // Stop if scoring failed
+      }
+      
+      // 2. Get Wallet Address (either from state or by connecting)
+      let finalWalletAddress = walletAddress;
+      if (!finalWalletAddress) {
+        addMessage('bot', 'Connecting to your wallet...');
+        finalWalletAddress = await connectWallet();
+      }
 
+      if (!finalWalletAddress) {
+        addMessage('bot', 'Wallet connection is required to record your screening result. The screening is complete, but the result was not saved.');
+        setChatState('finished');
+        setIsLoading(false);
+        return; // Stop if wallet connection failed or was cancelled
+      }
+      
+      addMessage('bot', `Using wallet ${finalWalletAddress.slice(0, 6)}...${finalWalletAddress.slice(-4)} to record result...`);
+
+      // 3. Submit to HCS API with the wallet address as userId
+      try {
+        const screeningStatus = scoreData.score > 50 ? 'passed' : 'failed';
+        
         const hcsResponse = await fetch('/api/screening-result', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             projectId: projectId,
-            userId: userId,
+            userId: finalWalletAddress, // Use the wallet address here
             score: scoreData.score,
             status: screeningStatus
           }),
@@ -166,14 +262,14 @@ function ScreeningChat() {
         } else {
             addMessage('bot', `❌ Failed to record result: ${hcsResult.error}`);
         }
-
-      } catch (error: any) {
-        console.error("Failed to submit screening:", error);
-        addMessage('bot', `Sorry, an error occurred during scoring: ${error.message}`);
-        setChatState('finished');
+      } catch (hcsError: any) {
+          console.error("Failed to submit HCS result:", hcsError);
+          addMessage('bot', `Sorry, an error occurred while saving your result: ${hcsError.message}`);
       } finally {
-        setIsLoading(false);
+          setChatState('finished');
+          setIsLoading(false);
       }
+      // --- END MODIFIED BLOCK ---
     }
   };
 

@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import { ClerkProvider } from '@clerk/nextjs'
+import { WalletProvider } from "../context/wallet";
 
 const geist = Geist({ subsets: ["latin"] })
 const geistMono = Geist_Mono({ subsets: ["latin"] })
@@ -22,7 +23,9 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en" className="dark">
         <body className={`${geist.className} antialiased bg-background text-foreground`}>
-          {children}
+        <WalletProvider> 
+            {children}
+          </WalletProvider>
         </body>
       </html>
     </ClerkProvider>
