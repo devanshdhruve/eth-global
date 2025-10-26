@@ -2,10 +2,13 @@ import dotenv from 'dotenv';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { AgentExecutor, createToolCallingAgent } from 'langchain/agents';
 import { Client, PrivateKey } from '@hashgraph/sdk';
+// @ts-ignore: moduleResolution for 'hedera-agent-kit' may require "node16"/"nodenext" in tsconfig; suppressing here.
+// If you prefer a permanent fix, update tsconfig.json compilerOptions.moduleResolution to "node16" or "nodenext".
 import { HederaLangchainToolkit, coreConsensusPlugin } from 'hedera-agent-kit';
 import { ChatOpenAI } from '@langchain/openai';
 
-dotenv.config({ path: '/Users/veerchheda/coding/ethonline/eth-global/hedera/.env' });
+// Load .env from repo root or current directory
+dotenv.config();
 
 // Task interface with IPFS hash
 export interface Task {
@@ -18,14 +21,15 @@ export interface Project {
   projectId: string;
   taskCount: number;
   reward: number;
-  status: "open" | "assigned" | "completed";
+  // allow a failed state to represent assignment/screening failure
+  status: "open" | "assigned" | "completed" | "failed";
   tasks: Task[]; // Array of tasks with IPFS hashes
   createdAt: Date;
   instruction: string;
 }
 
 export interface ProjectMessage {
-  event: "new_project" | "project_assigned" | "project_completed";
+  event: "new_project" | "project_assigned" | "project_completed" | "project_failed";
   projectId: string;
   taskCount: number;
   reward: number;
@@ -46,9 +50,16 @@ export class TaskManagerAgent {
   constructor(topicId?: string) {
     this.topicId = topicId || process.env.PROJECT_TOPICS_ID || "";
     
+    const operatorId = process.env.HEDERA_TESTNET_ACCOUNT_ID;
+    const operatorKey = process.env.HEDERA_TESTNET_PRIVATE_KEY || process.env.HEDERA_TESTNET_OPERATOR_KEY;
+    
+    if (!operatorId || !operatorKey) {
+      throw new Error("Missing HEDERA_TESTNET_ACCOUNT_ID or HEDERA_TESTNET_PRIVATE_KEY in environment variables");
+    }
+    
     this.client = Client.forTestnet().setOperator(
-      process.env.HEDERA_TESTNET_ACCOUNT_ID!,
-      PrivateKey.fromStringECDSA(process.env.HEDERA_TESTNET_PRIVATE_KEY!)
+      operatorId,
+      PrivateKey.fromStringECDSA(operatorKey)
     );
   }
 
@@ -164,7 +175,7 @@ export class TaskManagerAgent {
    */
   async updateProjectStatus(
     projectId: string, 
-    status: "open" | "assigned" | "completed"
+    status: "open" | "assigned" | "completed" | "failed"
   ): Promise<void> {
     const project = this.projects.find(p => p.projectId === projectId);
     
@@ -175,7 +186,7 @@ export class TaskManagerAgent {
     project.status = status;
 
     const message: ProjectMessage = {
-      event: status === "assigned" ? "project_assigned" : "project_completed",
+      event: status === "assigned" ? "project_assigned" : status === "completed" ? "project_completed" : "project_failed",
       projectId,
       taskCount: project.taskCount,
       reward: project.reward,

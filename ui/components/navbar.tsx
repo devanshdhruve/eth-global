@@ -2,89 +2,25 @@
 
 import Link from "next/link"
 import { Menu, X, LogOut } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useUserRole } from "@/hooks/useUserRole"
 import { useClerk, useUser } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
+import { useWallet } from "../context/wallet" // Import the shared hook
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const { role } = useUserRole()
-  const { isSignedIn, user } = useUser()
+  const { isSignedIn } = useUser()
   const { signOut } = useClerk()
   const router = useRouter()
 
-  useEffect(() => {
-    // Load wallet address from Clerk metadata
-    if (user?.publicMetadata?.wallet_address) {
-      setWalletAddress(user.publicMetadata.wallet_address as string)
-    }
-  }, [user])
-
-  const connectWallet = async () => {
-    if (typeof window === "undefined" || !user) {
-      console.warn("User not loaded yet or not in browser environment.")
-      return
-    }
-    
-    if (!window.ethereum) {
-      alert("Please install MetaMask to connect your wallet.")
-      return
-    }
-
-    try {
-      // Request accounts from MetaMask
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts",
-      })
-
-      const address = accounts[0]
-      setWalletAddress(address)
-      console.log("Connected wallet address:", address)
-
-      // Save to Clerk user metadata
-      try {
-        await user.update({
-          unsafeMetadata: {
-            ...user.unsafeMetadata,
-            wallet_address: address
-          }
-        })
-        console.log("Wallet address saved successfully to Clerk user metadata.")
-      } catch (clerkErr) {
-        console.error("Error saving wallet address to Clerk:", clerkErr)
-        alert("Wallet connected locally, but failed to save to your profile.")
-      }
-
-    } catch (err: any) {
-      console.error("Wallet connection failed:", err)
-      alert("Failed to connect wallet: " + (err.message || "Unknown error"))
-    }
-  }
-
-  const disconnectWallet = async () => {
-    setWalletAddress(null)
-    console.log("Wallet disconnected locally.")
-    
-    // Optionally remove from Clerk metadata
-    if (user) {
-      try {
-        await user.update({
-          unsafeMetadata: {
-            ...user.unsafeMetadata,
-            wallet_address: null
-          }
-        })
-      } catch (err) {
-        console.error("Error removing wallet from Clerk:", err)
-      }
-    }
-  }
+  // Use the shared context for all wallet-related data and functions
+  const { walletAddress, connectWallet, disconnectWallet } = useWallet()
 
   const handleLogout = async () => {
     await signOut()
-    setWalletAddress(null)
+    await disconnectWallet() // Also disconnect wallet on logout for a clean state
     router.push("/")
   }
 
@@ -162,13 +98,7 @@ export function Navbar() {
 
             {isSignedIn && (
               <button
-                onClick={() => {
-                  if (walletAddress) {
-                    disconnectWallet()
-                  } else {
-                    connectWallet()
-                  }
-                }}
+                onClick={walletAddress ? disconnectWallet : connectWallet}
                 className="px-6 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow"
               >
                 {walletAddress
@@ -211,12 +141,13 @@ export function Navbar() {
               )}
               {isSignedIn && (
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (walletAddress) {
-                      disconnectWallet().then(() => setIsOpen(false))
+                      await disconnectWallet()
                     } else {
-                      connectWallet().then(() => setIsOpen(false))
+                      await connectWallet()
                     }
+                    setIsOpen(false)
                   }}
                   className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white"
                 >
