@@ -20,9 +20,16 @@ interface Project {
   event: string
 }
 
+// NEW: MyProject includes screening status
+interface MyProject {
+  project: Project
+  screeningStatus: 'passed' | 'failed'
+}
+
+// NEW: State to hold both available and user's projects
 interface ProjectLists {
   available: Project[]
-  myProjects: Project[]
+  myProjects: MyProject[]
 }
 
 export default function ProjectsPage() {
@@ -81,13 +88,23 @@ export default function ProjectsPage() {
 
   const projectsToDisplay = view === 'available' ? projects.available : projects.myProjects
   const filteredProjects = projectsToDisplay
-    .filter((project) =>
-      project.projectId.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    .filter((item) => {
+      // Handle both direct projects and {project, screeningStatus} structure
+      const project = 'project' in item ? item.project : item;
+      return project?.projectId?.toLowerCase()?.includes(searchQuery.toLowerCase()) || false;
+    })
     .sort((a, b) => {
-      if (sortBy === "reward") return b.reward - a.reward
-      if (sortBy === "tasks") return b.taskCount - a.taskCount
-      if (sortBy === "newest") return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      // Handle both direct projects and {project, screeningStatus} structure
+      const projectA = 'project' in a ? a.project : a;
+      const projectB = 'project' in b ? b.project : b;
+      
+      if (sortBy === "reward") return (projectB.reward || 0) - (projectA.reward || 0)
+      if (sortBy === "tasks") return (projectB.taskCount || 0) - (projectA.taskCount || 0)
+      if (sortBy === "newest") {
+        const timeA = projectA.timestamp ? new Date(projectA.timestamp).getTime() : 0;
+        const timeB = projectB.timestamp ? new Date(projectB.timestamp).getTime() : 0;
+        return timeB - timeA;
+      }
       return 0
     })
 
@@ -214,23 +231,46 @@ export default function ProjectsPage() {
                     </button>
                   </div>
                 </div>
-              ) : filteredProjects.length > 0 ? (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredProjects.map((project, i) => (
-                    <motion.div
-                      key={project.projectId}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.6, delay: i * 0.1 }}
-                      className="group"
-                    >
-                      <Link href={`/projects/screening?projectId=${project.projectId}&instruction=${encodeURIComponent(project.instruction)}`}>
-                        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl transition-all duration-300 hover:bg-white/10 hover:border-white/20 h-full flex flex-col overflow-hidden cursor-pointer">
-                          <div className="relative h-40 overflow-hidden bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center">
-                            <div className="text-6xl">📊</div>
-                            <div className="absolute top-3 right-3 px-3 py-1 bg-green-500/20 backdrop-blur-sm rounded-full text-xs font-semibold text-green-400 border border-green-500/30">
-                              Open
-                            </div>
+            </div>
+          ) : filteredProjects.length > 0 ? (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredProjects.map((item, i) => {
+                // Handle both Project and MyProject types
+                const project = 'project' in item ? item.project : item;
+                const screeningStatus = 'screeningStatus' in item ? item.screeningStatus : undefined;
+
+                return (
+                <motion.div
+                  key={project.projectId}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: i * 0.1 }}
+                  className="group"
+                >
+                  {/* Link logic:
+                    - If in "available" view (not screened yet) → Go to screening
+                    - If in "myProjects" view:
+                      - If passed → Go to annotation page
+                      - If failed → Show as disabled (no link or go to project detail with error)
+                  */}
+                  <Link href={
+                    view === 'available' 
+                      ? `/projects/screening?projectId=${project.projectId}&instruction=${encodeURIComponent(project.instruction)}`
+                      : screeningStatus === 'passed'
+                        ? `/projects/${project.projectId}`
+                        : '#'
+                  }>
+                    <div className={`bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl transition-all duration-300 hover:bg-white/10 hover:border-white/20 h-full flex flex-col overflow-hidden ${screeningStatus === 'failed' ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
+                      <div className="relative h-40 overflow-hidden bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center">
+                          <div className="text-6xl">📊</div>
+                          <div className="absolute top-3 right-3 px-3 py-1 backdrop-blur-sm rounded-full text-xs font-semibold border">
+                            {screeningStatus === 'failed' ? (
+                              <span className="px-2 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-full">Screening Failed</span>
+                            ) : screeningStatus === 'passed' ? (
+                              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-full">Ready to Annotate</span>
+                            ) : (
+                              <span className="px-2 py-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded-full">Open</span>
+                            )}
                           </div>
                           <div className="p-6 flex flex-col flex-grow">
                             <h3 className="text-lg font-bold mt-2 group-hover:text-blue-400 transition-colors">
@@ -259,15 +299,27 @@ export default function ProjectsPage() {
                               {view === 'available' ? 'Start Screening' : 'Start Annotating'}
                             </button>
                           </div>
-                        </div>
-                      </Link>
-                    </motion.div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-20">
-                  <div className="bg-white/5 border border-white/10 rounded-lg p-12 max-w-md mx-auto">
-                    <p className="text-foreground/60 text-lg mb-2">No projects found in this category.</p>
+                          {/* MODIFIED: The button text makes more sense now */}
+                          <div className="mt-4">
+                            {screeningStatus === 'failed' ? (
+                              <Link href={`/projects/${project.projectId}`} className="w-full inline-block px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg font-semibold text-red-300 hover:bg-red-500/30 transition-all duration-300 text-center">View Details</Link>
+                            ) : (
+                              <button className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg font-semibold text-white hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 neon-glow">
+                                {view === 'available' ? 'Start Screening' : 'Start Annotating'}
+                              </button>
+                            )}
+                          </div>
+                      </div>
+                    </div>
+                  </Link>
+                </motion.div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-20">
+                <div className="bg-white/5 border border-white/10 rounded-lg p-12 max-w-md mx-auto">
+                    <p className="text-foreground/60 text-lg mb-2">No projects found in this category</p>
                     <p className="text-foreground/40 text-sm">
                       {view === 'available' ? 'Check back later or switch to "Your Projects".' : 'Pass a screening in "Available Projects" to see them here.'}
                     </p>
